@@ -40,3 +40,12 @@
   - `concepts/ragcore-facade-and-user-scope.md`
   - `concepts/runtime-configuration-and-lifecycle.md`
 - Source scope: `dms-core` v0.7.0 공개 API, 설정, lifecycle, recovery, metadata policy 및 FastAPI HTTP error projection
+
+## [2026-08-10] update | FastAPI API 계층 구현 계약 확정
+- Pages updated:
+  - `concepts/fastapi-rest-adapter-boundary.md`
+  - `entities/docmesh-rag-system-core.md`
+  - `index.md`
+- Recorded implemented endpoint/status contracts, strict Keycloak access-token/HTTPS policy, public DTO filtering, UTF-8/whitespace and upload/body limits, DMS error projection, runtime composition and reverse-order shutdown.
+- Applied independent-review follow-ups: documented public FastAPI discovery routes, aligned every protected operation's OpenAPI errors—including query `400`/`413`—and framework parser errors with runtime bodies, made explicit runtime mappings drive DocMesh loaders deterministically, and added deterministic MinIO HTTP-pool cleanup.
+- Remaining decisions retained explicitly: file idempotency, pagination, role authorization, proactive Keycloak readiness, and partial-failure recovery.

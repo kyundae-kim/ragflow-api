@@ -47,6 +47,12 @@ confidence: high
 
 이 제한은 FastAPI 서비스가 validation, multipart 처리, 예외 매핑, timeout, 인증, 관측성을 별도로 설계해야 함을 뜻한다. ^[raw/articles/docmesh-api-reference.md]
 
+## 이 repository의 host 구현
+
+`ragflow-api v0.1.0`은 FastAPI를 API 계층으로 두고 `RAGCore` facade만 application use-case 경계로 호출한다. Keycloak JWT의 검증된 `sub`를 `AuthenticatedUser`로 만들며, user scope를 client 입력으로 받지 않는다. HTTP DTO는 `user_id`, DMS asset reference, prompt와 allowlist 밖 chunk metadata를 숨긴다. [[fastapi-rest-adapter-boundary]]
+
+composition root는 host-owned SQLAlchemy Engine와 MinIO client, Ollama/Milvus bundle을 조립하고 FastAPI lifespan에서 종료 순서를 관리한다. 이 구현은 library가 HTTP와 adapter lifecycle을 소유하지 않는다는 원래 경계를 유지한다. [[runtime-configuration-and-lifecycle]]
+
 ## 관련 페이지
 
 - [[ragcore-facade-and-user-scope]]

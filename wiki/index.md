@@ -16,7 +16,7 @@
 - [[dms-access-idempotency-and-metadata-policy]] — DMS 접근 context, 멱등 업로드, metadata 검증과 관찰 policy.
 - [[dms-document-lifecycle]] — DMS 업로드·공개 metadata·stream·삭제·reset·reconciliation lifecycle.
 - [[dms-error-and-http-contract]] — stable DMS error code/category/retryability와 HTTP projection.
-- [[fastapi-rest-adapter-boundary]] — HTTP endpoint가 없는 RAGCore를 FastAPI REST 경계로 노출하기 위한 설계 초안.
+- [[fastapi-rest-adapter-boundary]] — RAGCore를 application 계층으로 호출하는 구현된 FastAPI REST·인증·오류·lifecycle 계약.
 - [[rag-ingestion-pipeline]] — asset 저장부터 chunking, embedding, vector/metadata 기록까지의 ingestion 흐름.
 - [[rag-query-flow]] — 질문 embedding, user-scoped retrieval, prompt 구성, generation 흐름.
 - [[ragcore-facade-and-user-scope]] — RAGCore dependency injection과 AuthenticatedUser.sub 기반 scope.

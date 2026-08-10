@@ -208,3 +208,6 @@ __marimo__/
 
 # Hermes
 .hermes/
+
+# Local runtime state
+data/
