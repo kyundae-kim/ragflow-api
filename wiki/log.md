@@ -68,3 +68,10 @@
   - `concepts/fastapi-rest-adapter-boundary.md`
   - `index.md`
 - Source scope: package `0.4.0` public API, explicit configuration/client assembly, `AuthenticatedUser(sub)` user boundary, ServiceBundle/Factory lifecycle, DMS `>=0.9.0` dependency, and runnable examples.
+
+## [2026-08-20] update | Keycloak 인증 제거 및 직접 user scope 입력
+- Pages updated:
+  - `concepts/fastapi-rest-adapter-boundary.md`
+  - `entities/docmesh-rag-system-core.md`
+  - `index.md`
+- Replaced the former Keycloak/Bearer contract with the host API's direct `X-User-Id` header contract. The API now creates `AuthenticatedUser(sub=...)` without identity-provider verification; trusted gateway/user-header ownership remains an external boundary responsibility.

@@ -10,7 +10,6 @@ from starlette.types import Message, Receive, Scope, Send
 
 from ragflow.api.middleware import ConfiguredRequestBodyLimitMiddleware
 from ragflow.app import create_app
-from ragflow.auth import Authenticator
 
 
 def test_request_body_limit_counts_streamed_body_without_content_length() -> None:
@@ -70,7 +69,6 @@ def test_request_body_limit_counts_streamed_body_without_content_length() -> Non
 def test_fastapi_preserves_streaming_body_limit_error_contract() -> None:
     app = create_app(
         core=cast(RAGCore, object()),
-        authenticator=cast(Authenticator, object()),
     )
     app.state.max_request_bytes = 4
     received: list[Message] = [

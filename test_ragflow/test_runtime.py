@@ -11,13 +11,9 @@ from ragflow import runtime
 from ragflow.runtime import RuntimeSettings
 
 
-def test_runtime_settings_load_host_owned_api_configuration() -> None:
+def test_runtime_settings_load_host_owned_configuration() -> None:
     settings = RuntimeSettings.from_env(
         {
-            "KEYCLOAK__HTTP_URL": "https://identity.example/",
-            "KEYCLOAK__REALM": "docmesh",
-            "KEYCLOAK__CLIENT_ID": "rag-api",
-            "KEYCLOAK_ALLOW_INSECURE_HTTP": "true",
             "RAGFLOW_METADATA_DATABASE_URL": "sqlite+pysqlite:///./data/test.db",
             "RAGFLOW_CHUNK_SIZE": "1024",
             "RAGFLOW_CHUNK_OVERLAP": "128",
@@ -26,10 +22,6 @@ def test_runtime_settings_load_host_owned_api_configuration() -> None:
         }
     )
 
-    assert settings.keycloak.base_url == "https://identity.example/"
-    assert settings.keycloak.realm == "docmesh"
-    assert settings.keycloak.client_id == "rag-api"
-    assert settings.keycloak.allow_insecure_http is True
     assert settings.metadata_database_url == "sqlite+pysqlite:///./data/test.db"
     assert settings.chunk_size == 1024
     assert settings.chunk_overlap == 128
@@ -41,34 +33,57 @@ def test_runtime_settings_reject_invalid_chunk_window() -> None:
     with pytest.raises(ValueError, match="chunk_overlap"):
         RuntimeSettings.from_env(
             {
-                "KEYCLOAK_URL": "https://identity.example/",
-                "KEYCLOAK_REALM": "docmesh",
-                "KEYCLOAK_CLIENT_ID": "rag-api",
                 "RAGFLOW_CHUNK_SIZE": "64",
                 "RAGFLOW_CHUNK_OVERLAP": "64",
             }
         )
 
 
-def test_explicit_runtime_mapping_temporarily_drives_docmesh_loaders(
+def test_explicit_runtime_mapping_builds_rag_service_settings_without_mutating_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OLLAMA_HOST", "http://process.example")
     monkeypatch.setenv("MILVUS_ENDPOINT", "process.db")
     monkeypatch.setenv("UNRELATED_SETTING", "preserved")
 
-    with runtime._docmesh_configuration_environment(
+    settings = runtime._load_rag_service_configs(
         {
             "OLLAMA_HOST": "http://mapping.example",
+            "OLLAMA_EMBEDDING_MODEL": "embedding-model",
+            "OLLAMA_GENERATION_MODEL": "generation-model",
             "MILVUS_ENDPOINT": "mapping.db",
+            "MILVUS_COLLECTION": "mapping_chunks",
         }
-    ):
-        assert os.environ["OLLAMA_HOST"] == "http://mapping.example"
-        assert os.environ["MILVUS_ENDPOINT"] == "mapping.db"
-        assert os.environ["UNRELATED_SETTING"] == "preserved"
+    )
 
+    assert settings.ollama is not None
+    assert settings.ollama.host == "http://mapping.example"
+    assert settings.ollama.embedding_model == "embedding-model"
+    assert settings.ollama.generation_model == "generation-model"
+    assert settings.milvus is not None
+    assert settings.milvus.endpoint == "mapping.db"
+    assert settings.milvus.collection == "mapping_chunks"
     assert os.environ["OLLAMA_HOST"] == "http://process.example"
     assert os.environ["MILVUS_ENDPOINT"] == "process.db"
+    assert os.environ["UNRELATED_SETTING"] == "preserved"
+
+
+def test_load_dms_settings_reads_host_owned_configuration() -> None:
+    settings = runtime.load_dms_settings(
+        {
+            "DMS_METADATA_BACKEND": "sqlite",
+            "DMS_SQLITE_PATH": ":memory:",
+            "DMS_MINIO_ENDPOINT": "minio:9000",
+            "DMS_MINIO_ACCESS_KEY": "access",
+            "DMS_MINIO_SECRET_KEY": "secret",
+            "DMS_MINIO_BUCKET": "documents",
+        }
+    )
+
+    assert settings.metadata_backend == "sqlite"
+    assert settings.sqlite_path == ":memory:"
+    assert settings.minio_endpoint == "minio:9000"
+    assert settings.minio_bucket == "documents"
 
 
 def test_build_runtime_closes_every_host_owned_resource(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,7 +100,12 @@ def test_build_runtime_closes_every_host_owned_resource(monkeypatch: pytest.Monk
             events.append(self.name)
 
     bundle = Closeable("bundle")
-    bundle.configs = object()  # type: ignore[attr-defined]
+    raw_ollama_client = object()
+    raw_milvus_client = object()
+    bundle.get_client = lambda service: {  # type: ignore[attr-defined]
+        "ollama": raw_ollama_client,
+        "milvus": raw_milvus_client,
+    }[service]
     dms_engine = Closeable("dms-engine")
     metadata_engine = Closeable("metadata-engine")
     metadata_store = Closeable("metadata-store")
@@ -96,7 +116,7 @@ def test_build_runtime_closes_every_host_owned_resource(monkeypatch: pytest.Monk
 
     class FactoryType:
         @classmethod
-        def from_clients(cls, **kwargs: object) -> Closeable:
+        def from_host_clients(cls, **kwargs: object) -> Closeable:
             captured.update(kwargs)
             return factory
 
@@ -122,27 +142,25 @@ def test_build_runtime_closes_every_host_owned_resource(monkeypatch: pytest.Monk
 
     minio_client = SimpleNamespace(_http=HttpPool())
     monkeypatch.setattr(runtime, "Minio", lambda **_: minio_client)
-    embedding = object()
-    generation = object()
-    vectors = object()
-    monkeypatch.setattr(runtime, "create_rag_embedding_client", lambda **_: embedding)
-    monkeypatch.setattr(runtime, "create_rag_generation_client", lambda **_: generation)
-    monkeypatch.setattr(runtime, "create_rag_vector_store", lambda **_: vectors)
     monkeypatch.setattr(runtime, "DocmeshRAGServiceFactory", FactoryType)
 
     env = {
-        "KEYCLOAK_URL": "https://identity.example/",
-        "KEYCLOAK_REALM": "docmesh",
-        "KEYCLOAK_CLIENT_ID": "rag-api",
+        "OLLAMA_HOST": "http://ollama.example",
+        "OLLAMA_EMBEDDING_MODEL": "embedding-model",
+        "OLLAMA_GENERATION_MODEL": "generation-model",
+        "MILVUS_ENDPOINT": "milvus.example",
     }
     with runtime.build_runtime(env) as components:
         assert components.core is core
         assert captured["engine"] is dms_engine
         assert captured["metadata_engine"] is metadata_engine
         assert captured["minio_client"] is minio_client
-        assert captured["embedding_client"] is embedding
-        assert captured["generation_client"] is generation
-        assert captured["vector_store"] is vectors
+        assert captured["ollama_client"] is raw_ollama_client
+        assert captured["milvus_client"] is raw_milvus_client
+        assert captured["embedding_model"] == "embedding-model"
+        assert captured["generation_model"] == "generation-model"
+        assert captured["collection_name"] == "rag_chunks"
+        assert captured["timeout"] == 30.0
         assert events == []
 
     assert events == [

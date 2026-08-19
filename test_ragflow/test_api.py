@@ -119,40 +119,18 @@ class MemoryDocumentStorage:
         self.values.pop(document.asset_reference or document.doc_id, None)
 
 
-class StaticAuthenticator:
-    def __init__(self, user: AuthenticatedUser) -> None:
-        self.user = user
-
-    def authenticate(self, token: str) -> AuthenticatedUser:
-        assert token == "test-token"
-        return self.user
-
-
 def make_user(sub: str = "user-a") -> AuthenticatedUser:
-    return AuthenticatedUser(
-        sub=sub,
-        preferred_username=sub,
-        email=None,
-        given_name=None,
-        family_name=None,
-        name=None,
-        realm_roles=[],
-        client_roles={},
-        claims={},
-    )
+    return AuthenticatedUser(sub=sub)
 
 
 @contextmanager
 def running_api(
     *,
-    user: AuthenticatedUser | None = None,
-    authenticator: object | None = None,
     raise_server_exceptions: bool = True,
     max_upload_bytes: int = 10 * 1024 * 1024,
 ) -> Iterator[tuple[TestClient, RAGCore]]:
     from ragflow.app import create_app
 
-    authenticated_user = user or make_user()
     engine = create_engine(
         "sqlite+pysqlite://",
         connect_args={"check_same_thread": False},
@@ -170,7 +148,6 @@ def running_api(
     )
     app = create_app(
         core=core,
-        authenticator=authenticator or StaticAuthenticator(authenticated_user),  # type: ignore[arg-type]
         max_upload_bytes=max_upload_bytes,
     )
     try:
@@ -184,16 +161,16 @@ def running_api(
         engine.dispose()
 
 
-def auth_headers() -> dict[str, str]:
-    return {"Authorization": "Bearer test-token"}
+def user_headers(user_id: str = "user-a") -> dict[str, str]:
+    return {"X-User-Id": user_id}
 
 
 def test_ingest_text_uses_rag_core_and_returns_public_result() -> None:
     user = make_user()
-    with running_api(user=user) as (client, core):
+    with running_api() as (client, core):
         response = client.post(
             "/documents/text",
-            headers=auth_headers(),
+            headers=user_headers(),
             json={"text": "  FastAPI delegates to RAGCore.  ", "source": "guide.txt"},
         )
 
@@ -212,14 +189,14 @@ def test_ingest_text_uses_rag_core_and_returns_public_result() -> None:
         assert [document.doc_id for document in documents] == [body["doc_id"]]
 
 
-def test_list_documents_returns_only_authenticated_users_public_records() -> None:
+def test_list_documents_returns_only_requested_user_public_records() -> None:
     user = make_user()
     other_user = make_user("user-b")
-    with running_api(user=user) as (client, core):
+    with running_api() as (client, core):
         own = core.ingest_text(user=user, text="owned", source="owned.txt")
         core.ingest_text(user=other_user, text="hidden", source="hidden.txt")
 
-        response = client.get("/documents", headers=auth_headers())
+        response = client.get("/documents", headers=user_headers())
 
         assert response.status_code == 200
         assert response.json() == [
@@ -233,12 +210,12 @@ def test_list_documents_returns_only_authenticated_users_public_records() -> Non
 
 def test_get_document_returns_a_public_record() -> None:
     user = make_user()
-    with running_api(user=user) as (client, core):
+    with running_api() as (client, core):
         document = core.ingest_text(user=user, text="owned", source="owned.txt")
 
         response = client.get(
             f"/documents/{document.doc_id}",
-            headers=auth_headers(),
+            headers=user_headers(),
         )
 
         assert response.status_code == 200
@@ -250,8 +227,7 @@ def test_get_document_returns_a_public_record() -> None:
 
 
 def test_get_document_hides_records_owned_by_another_user() -> None:
-    user = make_user()
-    with running_api(user=user) as (client, core):
+    with running_api() as (client, core):
         hidden = core.ingest_text(
             user=make_user("user-b"),
             text="hidden",
@@ -260,7 +236,7 @@ def test_get_document_hides_records_owned_by_another_user() -> None:
 
         response = client.get(
             f"/documents/{hidden.doc_id}",
-            headers=auth_headers(),
+            headers=user_headers(),
         )
 
         assert response.status_code == 404
@@ -274,12 +250,12 @@ def test_get_document_hides_records_owned_by_another_user() -> None:
 
 def test_list_document_chunks_returns_public_chunk_data() -> None:
     user = make_user()
-    with running_api(user=user) as (client, core):
+    with running_api() as (client, core):
         document = core.ingest_text(user=user, text="chunk body", source="owned.txt")
 
         response = client.get(
             f"/documents/{document.doc_id}/chunks",
-            headers=auth_headers(),
+            headers=user_headers(),
         )
 
         assert response.status_code == 200
@@ -323,7 +299,7 @@ def test_list_document_chunks_hides_another_users_document() -> None:
 
         response = client.get(
             f"/documents/{hidden.doc_id}/chunks",
-            headers=auth_headers(),
+            headers=user_headers(),
         )
 
         assert response.status_code == 404
@@ -332,12 +308,12 @@ def test_list_document_chunks_hides_another_users_document() -> None:
 
 def test_list_ingestion_progress_returns_public_pipeline_transitions() -> None:
     user = make_user()
-    with running_api(user=user) as (client, core):
+    with running_api() as (client, core):
         document = core.ingest_text(user=user, text="body", source="owned.txt")
 
         response = client.get(
             f"/documents/{document.doc_id}/ingestion-progress",
-            headers=auth_headers(),
+            headers=user_headers(),
             params={"job_id": document.job_id},
         )
 
@@ -369,7 +345,7 @@ def test_list_ingestion_progress_hides_another_users_document() -> None:
 
         response = client.get(
             f"/documents/{hidden.doc_id}/ingestion-progress",
-            headers=auth_headers(),
+            headers=user_headers(),
         )
 
         assert response.status_code == 404
@@ -378,12 +354,12 @@ def test_list_ingestion_progress_hides_another_users_document() -> None:
 
 def test_delete_document_delegates_to_rag_core() -> None:
     user = make_user()
-    with running_api(user=user) as (client, core):
+    with running_api() as (client, core):
         document = core.ingest_text(user=user, text="body", source="owned.txt")
 
         response = client.delete(
             f"/documents/{document.doc_id}",
-            headers=auth_headers(),
+            headers=user_headers(),
         )
 
         assert response.status_code == 204
@@ -395,7 +371,7 @@ def test_delete_document_returns_not_found_for_unknown_document() -> None:
     with running_api() as (client, _):
         response = client.delete(
             "/documents/missing",
-            headers=auth_headers(),
+            headers=user_headers(),
         )
 
         assert response.status_code == 404
@@ -405,14 +381,12 @@ def test_delete_document_returns_not_found_for_unknown_document() -> None:
 def test_delete_document_hides_and_preserves_another_users_document() -> None:
     owner = make_user("owner")
     other_user = make_user("other")
-    authenticator = StaticAuthenticator(owner)
-    with running_api(authenticator=authenticator) as (client, core):
+    with running_api() as (client, core):
         document = core.ingest_text(user=owner, text="private", source="owned.txt")
-        authenticator.user = other_user
 
         response = client.delete(
             f"/documents/{document.doc_id}",
-            headers=auth_headers(),
+            headers=user_headers(other_user.sub),
         )
 
         assert response.status_code == 404
@@ -422,10 +396,10 @@ def test_delete_document_hides_and_preserves_another_users_document() -> None:
 
 def test_ingest_file_stream_uses_upload_filename_as_source() -> None:
     user = make_user()
-    with running_api(user=user) as (client, core):
+    with running_api() as (client, core):
         response = client.post(
             "/documents/file",
-            headers=auth_headers(),
+            headers=user_headers(),
             files={"file": ("notes.txt", "파일 본문".encode(), "text/plain")},
         )
 
@@ -441,7 +415,7 @@ def test_ingest_file_stream_normalizes_explicit_source() -> None:
     with running_api() as (client, _):
         response = client.post(
             "/documents/file",
-            headers=auth_headers(),
+            headers=user_headers(),
             data={"source": "  imported.txt  "},
             files={"file": ("upload.txt", b"body", "text/plain")},
         )
@@ -452,10 +426,10 @@ def test_ingest_file_stream_normalizes_explicit_source() -> None:
 
 def test_ingest_file_stream_rejects_oversized_upload_before_application_call() -> None:
     user = make_user()
-    with running_api(user=user, max_upload_bytes=4) as (client, core):
+    with running_api(max_upload_bytes=4) as (client, core):
         response = client.post(
             "/documents/file",
-            headers=auth_headers(),
+            headers=user_headers(),
             files={"file": ("notes.txt", b"12345", "text/plain")},
         )
 
@@ -471,10 +445,10 @@ def test_ingest_file_stream_rejects_oversized_upload_before_application_call() -
 
 def test_request_body_limit_rejects_multipart_before_route_processing() -> None:
     user = make_user()
-    with running_api(user=user, max_upload_bytes=4) as (client, core):
+    with running_api(max_upload_bytes=4) as (client, core):
         response = client.post(
             "/documents/file",
-            headers=auth_headers(),
+            headers=user_headers(),
             files={"file": ("notes.txt", b"x" * (1024 * 1024 + 5), "text/plain")},
         )
 
@@ -490,10 +464,10 @@ def test_request_body_limit_rejects_multipart_before_route_processing() -> None:
 
 def test_ingest_file_stream_rejects_empty_upload_before_application_call() -> None:
     user = make_user()
-    with running_api(user=user) as (client, core):
+    with running_api() as (client, core):
         response = client.post(
             "/documents/file",
-            headers=auth_headers(),
+            headers=user_headers(),
             files={"file": ("notes.txt", b"", "text/plain")},
         )
 
@@ -509,10 +483,10 @@ def test_ingest_file_stream_rejects_empty_upload_before_application_call() -> No
 
 def test_ingest_file_stream_rejects_whitespace_only_upload_before_application_call() -> None:
     user = make_user()
-    with running_api(user=user) as (client, core):
+    with running_api() as (client, core):
         response = client.post(
             "/documents/file",
-            headers=auth_headers(),
+            headers=user_headers(),
             files={"file": ("empty.txt", b" \n\t", "text/plain")},
         )
 
@@ -528,7 +502,7 @@ def test_ingest_file_stream_rejects_whitespace_only_upload_before_application_ca
 
 def test_query_returns_answer_and_public_user_scoped_context() -> None:
     user = make_user()
-    with running_api(user=user) as (client, core):
+    with running_api() as (client, core):
         document = core.ingest_text(
             user=user,
             text="FastAPI is the transport layer.",
@@ -542,7 +516,7 @@ def test_query_returns_answer_and_public_user_scoped_context() -> None:
 
         response = client.post(
             "/query",
-            headers=auth_headers(),
+            headers=user_headers(),
             json={"question": "What is FastAPI?", "top_k": 3},
         )
 
@@ -564,7 +538,7 @@ def test_query_rejects_blank_question() -> None:
     with running_api() as (client, _):
         response = client.post(
             "/query",
-            headers=auth_headers(),
+            headers=user_headers(),
             json={"question": "   "},
         )
 
@@ -572,7 +546,7 @@ def test_query_rejects_blank_question() -> None:
         assert response.json()["issues"][0]["location"] == ["body", "question"]
 
 
-def test_liveness_does_not_require_authentication() -> None:
+def test_liveness_does_not_require_user_header() -> None:
     with running_api() as (client, _):
         response = client.get("/health/live")
 
@@ -614,75 +588,25 @@ def test_readiness_returns_sanitized_service_unavailable() -> None:
         assert "secret" not in response.text
 
 
-def test_protected_endpoint_requires_bearer_authentication() -> None:
+def test_business_endpoint_requires_direct_user_id() -> None:
     with running_api() as (client, _):
         response = client.get("/documents")
 
-        assert response.status_code == 401
-        assert response.headers["www-authenticate"] == "Bearer"
+        assert response.status_code == 400
         assert response.json() == {
-            "code": "authentication_required",
-            "category": "authentication",
+            "code": "user_id_required",
+            "category": "validation",
             "retryable": False,
-            "message": "Bearer authentication is required",
+            "message": "X-User-Id header is required",
         }
-
-
-def test_invalid_bearer_token_returns_public_authentication_error() -> None:
-    from ragflow.auth import AuthenticationError
-
-    class RejectingAuthenticator:
-        def authenticate(self, token: str) -> AuthenticatedUser:
-            del token
-            raise AuthenticationError("signature details must stay private")
-
-    with running_api(authenticator=RejectingAuthenticator()) as (client, _):
-        response = client.get(
-            "/documents",
-            headers={"Authorization": "Bearer invalid-token"},
-        )
-
-        assert response.status_code == 401
-        assert response.headers["www-authenticate"] == "Bearer"
-        assert response.json() == {
-            "code": "invalid_token",
-            "category": "authentication",
-            "retryable": False,
-            "message": "The bearer token is invalid",
-        }
-        assert "signature" not in response.text
-
-
-def test_identity_provider_outage_returns_retryable_service_unavailable() -> None:
-    from ragflow.auth import AuthenticationUnavailableError
-
-    class UnavailableAuthenticator:
-        def authenticate(self, token: str) -> AuthenticatedUser:
-            del token
-            raise AuthenticationUnavailableError("identity.internal must stay private")
-
-    with running_api(authenticator=UnavailableAuthenticator()) as (client, _):
-        response = client.get(
-            "/documents",
-            headers={"Authorization": "Bearer unverifiable-token"},
-        )
-
-        assert response.status_code == 503
-        assert response.json() == {
-            "code": "authentication_unavailable",
-            "category": "dependency",
-            "retryable": True,
-            "message": "Authentication service is unavailable",
-        }
-        assert "identity.internal" not in response.text
 
 
 def test_text_ingestion_rejects_blank_content_before_application_call() -> None:
     user = make_user()
-    with running_api(user=user) as (client, core):
+    with running_api() as (client, core):
         response = client.post(
             "/documents/text",
-            headers=auth_headers(),
+            headers=user_headers(),
             json={"text": "   ", "source": "blank.txt"},
         )
 
@@ -700,7 +624,7 @@ def test_missing_request_body_uses_stable_public_error_contract() -> None:
     with running_api() as (client, _):
         response = client.post(
             "/documents/text",
-            headers=auth_headers(),
+            headers=user_headers(),
             content=b"",
         )
 
@@ -716,7 +640,7 @@ def test_text_ingestion_rejects_blank_source() -> None:
     with running_api() as (client, _):
         response = client.post(
             "/documents/text",
-            headers=auth_headers(),
+            headers=user_headers(),
             json={"text": "body", "source": "   "},
         )
 
@@ -726,10 +650,10 @@ def test_text_ingestion_rejects_blank_source() -> None:
 
 def test_file_ingestion_rejects_non_utf8_content() -> None:
     user = make_user()
-    with running_api(user=user) as (client, core):
+    with running_api() as (client, core):
         response = client.post(
             "/documents/file",
-            headers=auth_headers(),
+            headers=user_headers(),
             files={"file": ("binary.txt", b"\xff\xfe", "text/plain")},
         )
 
@@ -748,7 +672,7 @@ def test_multipart_parser_error_uses_stable_public_error_contract() -> None:
         response = client.post(
             "/documents/file",
             headers={
-                **auth_headers(),
+                **user_headers(),
                 "Content-Type": "multipart/form-data",
             },
             content=b"not-a-valid-multipart-body",
@@ -764,7 +688,7 @@ def test_multipart_parser_error_uses_stable_public_error_contract() -> None:
         assert "boundary" not in response.text
 
 
-def test_dms_errors_use_the_sdk_public_http_projection() -> None:
+def test_dms_errors_use_the_host_public_http_projection() -> None:
     with running_api() as (client, core):
 
         def fail_storage(**_: object) -> str:
@@ -774,7 +698,7 @@ def test_dms_errors_use_the_sdk_public_http_projection() -> None:
 
         response = client.post(
             "/documents/text",
-            headers=auth_headers(),
+            headers=user_headers(),
             json={"text": "body", "source": "source.txt"},
         )
 
@@ -791,7 +715,6 @@ def test_dms_errors_use_the_sdk_public_http_projection() -> None:
 def test_unhandled_application_error_returns_secret_safe_response() -> None:
     user = make_user()
     with running_api(
-        user=user,
         raise_server_exceptions=False,
     ) as (client, core):
         core.ingest_text(user=user, text="context", source="source.txt")
@@ -804,7 +727,7 @@ def test_unhandled_application_error_returns_secret_safe_response() -> None:
 
         response = client.post(
             "/query",
-            headers=auth_headers(),
+            headers=user_headers(),
             json={"question": "question"},
         )
 

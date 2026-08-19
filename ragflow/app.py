@@ -26,21 +26,17 @@ from ragflow.api.middleware import (
     request_body_too_large_handler,
 )
 from ragflow.api.query import router as query_router
-from ragflow.auth import Authenticator
 from ragflow.runtime import DEFAULT_MAX_UPLOAD_BYTES, RuntimeFactory, build_runtime
 
 
 def create_app(
     *,
     core: RAGCore | None = None,
-    authenticator: Authenticator | None = None,
     runtime_factory: RuntimeFactory | None = None,
     max_upload_bytes: int | None = None,
 ) -> FastAPI:
     if max_upload_bytes is not None and max_upload_bytes <= 0:
         raise ValueError("max_upload_bytes must be positive")
-    if (core is None) != (authenticator is None):
-        raise ValueError("core and authenticator must be provided together")
     if core is not None and runtime_factory is not None:
         raise ValueError("runtime_factory cannot be combined with injected components")
     if core is None and runtime_factory is None:
@@ -53,7 +49,6 @@ def create_app(
         async def managed_lifespan(app: FastAPI) -> AsyncIterator[None]:
             with runtime_factory() as components:
                 app.state.rag_core = components.core
-                app.state.authenticator = components.authenticator
                 effective_upload_limit = max_upload_bytes or components.max_upload_bytes
                 app.state.max_upload_bytes = effective_upload_limit
                 app.state.max_request_bytes = request_body_limit(effective_upload_limit)
@@ -62,10 +57,9 @@ def create_app(
         lifespan = managed_lifespan
 
     app = FastAPI(title="RAG Flow API", version="0.1.0", lifespan=lifespan)
-    if core is not None and authenticator is not None:
+    if core is not None:
         effective_upload_limit = max_upload_bytes or DEFAULT_MAX_UPLOAD_BYTES
         app.state.rag_core = core
-        app.state.authenticator = authenticator
         app.state.max_upload_bytes = effective_upload_limit
         app.state.max_request_bytes = request_body_limit(effective_upload_limit)
     app.add_middleware(ConfiguredRequestBodyLimitMiddleware)

@@ -6,6 +6,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from ragflow.api.errors import error_content
+
 MULTIPART_OVERHEAD_BYTES = 1024 * 1024
 DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024 + MULTIPART_OVERHEAD_BYTES
 
@@ -88,10 +90,10 @@ def request_body_too_large_handler(
 def _too_large_json_response() -> JSONResponse:
     return JSONResponse(
         status_code=413,
-        content={
-            "code": "request_too_large",
-            "category": "validation",
-            "retryable": False,
-            "message": "Request body is too large",
-        },
+        content=error_content(
+            code="request_too_large",
+            category="validation",
+            retryable=False,
+            message="Request body is too large",
+        ),
     )
