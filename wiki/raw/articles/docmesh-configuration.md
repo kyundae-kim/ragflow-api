@@ -1,109 +1,84 @@
 ---
 source_url: https://github.com/kyundae-kim/docmesh-rag-system-core/wiki/Configuration
-ingested: 2026-08-10
-sha256: 0060bb439a60c210a9a0ec44e3a39094ec71725397309a97db88cf802612d4d1
+ingested: 2026-08-20
+sha256: 77b5cdf6aab72c708be695c774f30789d2344011bbab02fc895027ca93e5ce4b
 ---
 # 설정 레퍼런스
 
-이 문서는 현재 구현의 configuration loader, runtime plan, DMS environment adapter가 읽는 값과 lifecycle을 정의합니다.
+이 문서는 현재 구현의 **명시적 configuration model, runtime plan, client assembly 경계와 lifecycle**을 설명합니다.
 
 - 공개 API: [API-Reference](API-Reference)
 - 실행 흐름: [Examples](Examples)
-- 구현 기준: `rag-system-core` `0.3.0`
+- 구현 기준: `rag-system-core` `0.4.0`
 
-> 이 라이브러리는 `.env` 파일을 자동으로 읽지 않습니다. 상위 애플리케이션, process manager 또는 실행 환경이 값을 `os.environ`에 로드해야 합니다.
+> 중요: 현재 패키지는 RAG 또는 DMS 설정을 process environment에서 자동으로 읽는 loader를 제공하지 않습니다. 상위 애플리케이션이 `ServiceConfigs`와 client를 직접 만들거나 host-owned raw client를 Factory에 전달해야 합니다.
 
-## 1. 설정 원천과 분리
+## 1. 설정 원천과 책임
 
-현재 설정은 두 namespace로 분리됩니다.
+| 영역 | 현재 지원 경로 | 책임 |
+|---|---|---|
+| RAG runtime | 명시적 `ServiceConfigs`, `ServiceBundle`, 또는 client 인자 | 호출자가 설정과 client를 준비 |
+| DMS runtime | `create_dms_sdk_from_clients(...)` | 호출자가 SQLAlchemy `Engine`, MinIO client, bucket을 준비 |
+| RAG metadata | `metadata_engine` 또는 compatibility `metadata_path` | Factory/호출자 lifecycle 규칙 적용 |
 
-| 영역 | Loader | 환경변수 prefix | 용도 |
-|---|---|---|---|
-| RAG runtime | `load_service_configs`, `load_available_service_configs`, `load_docmesh_settings` | `DOCMESH_`, `MILVUS_`, `OLLAMA_` | Ollama/Milvus client와 RAG adapter 조립 |
-| DMS runtime | `load_dms_settings` | `DMS_` | DMS metadata backend와 MinIO 설정 진단/조립 |
+`.env`, `DOCMESH_*`, `OLLAMA_*`, `MILVUS_*`, `DMS_*`를 자동으로 로드하는 public API는 현재 없습니다. `pydantic-settings`는 선언 의존성이지만 이 저장소의 composition 경로가 환경변수 loader를 호출한다는 뜻은 아닙니다.
 
-RAG metadata용 SQLAlchemy Engine/SQLite 경로는 `DocmeshRAGServiceFactory` 또는 호출자가 별도로 관리합니다. `load_dms_settings`의 `DMS_SQLITE_PATH`는 DMS metadata 경로이며 RAG metadata와 다른 저장소입니다.
+## 2. RAG 설정 모델
 
-설정 loader에 임의 mapping이나 SDK `**kwargs`를 전달하는 API는 없습니다. DMS loader만 진단·테스트 목적으로 `env: Mapping[str, str] | None`을 받습니다.
-
-## 2. RAG 공통 설정
-
-`CommonConfig` import: `rag_system_core.composition.configuration.CommonConfig`
-
-| 환경변수 | 타입 | 기본값 | 설명 |
-|---|---|---|---|
-| `DOCMESH_ENV` | `str` | `development` | 공통 runtime 환경 이름 |
-| `DOCMESH_SECURITY_MODE` | `development \| production` | `None` | 지정하면 `is_production` 판정에 우선 |
+Canonical import:
 
 ```python
-from rag_system_core.composition.configuration import CommonConfig
-
-common = CommonConfig()
-print(common.env, common.is_production)
+from rag_system_core.composition.configuration import (
+    ConfigError,
+    HealthcheckPolicy,
+    MilvusConfig,
+    OllamaConfig,
+    RuntimePlan,
+    Service,
+    ServiceConfigs,
+    ServiceSelection,
+)
 ```
 
-`CommonConfig.is_production`은 `security_mode == "production"`이거나 `env`가 `prod`/`production`이면 `True`입니다. 이 값 자체가 transport TLS를 자동으로 켜거나 외부 service를 연결하지는 않습니다.
+### `MilvusConfig`
 
-## 3. Ollama 설정
+| 필드 | 타입 | 기본값/제약 |
+|---|---|---|
+| `endpoint` | `str` | 필수 |
+| `token` | `str | None` | `None` |
+| `db_name` | `str` | `"default"` |
+| `collection` | `str | None` | `None` |
+| `secure` | `bool` | `False` |
+| `connect_timeout_seconds` | `int` | `10`, `>=1` |
+| `request_timeout_seconds` | `int` | `30`, `>=1` |
+| `max_retries` | `int` | `3`, `>=0` |
 
-`OllamaConfig` import: `rag_system_core.composition.configuration.OllamaConfig`
+### `OllamaConfig`
 
-| 환경변수 | 타입 | 기본값 | 설명 |
-|---|---|---|---|
-| `OLLAMA_HOST` | `str` | 필수 | Ollama endpoint |
-| `OLLAMA_VERIFY_SSL` | `bool` | `true` | client verify 옵션 |
-| `OLLAMA_FOLLOW_REDIRECTS` | `bool` | `true` | client redirect 옵션 |
-| `OLLAMA_GENERATION_MODEL` | `str` | `None` | generation adapter가 사용할 모델 |
-| `OLLAMA_EMBEDDING_MODEL` | `str` | `None` | embedding adapter가 사용할 모델 |
-| `OLLAMA_REQUEST_TIMEOUT_SECONDS` | `int >= 1` | `120` | Ollama client timeout |
-| `OLLAMA_MAX_RETRIES` | `int >= 0` | `2` | 설정 value로 보관되는 retry 정책 |
+| 필드 | 타입 | 기본값/제약 |
+|---|---|---|
+| `host` | `str` | 필수 |
+| `verify_ssl` | `bool` | `True` |
+| `follow_redirects` | `bool` | `True` |
+| `generation_model` | `str | None` | `None` |
+| `embedding_model` | `str | None` | `None` |
+| `request_timeout_seconds` | `int` | `120`, `>=1` |
+| `max_retries` | `int` | `2`, `>=0` |
 
-`OllamaConfig`는 `host`가 없으면 `ConfigError`로 변환되는 validation error를 발생시킵니다. `OllamaEmbeddingClient`와 `OllamaGenerationClient`를 직접 만들 때는 `client=`와 `model=`을 명시하며 환경 설정을 자동으로 읽지 않습니다.
-
-```python
-from rag_system_core.composition.configuration import load_service_configs
-
-settings = load_service_configs(services={"ollama"})
-assert settings.ollama is not None
-print(settings.ollama.host, settings.ollama.embedding_model)
-```
-
-## 4. Milvus 설정
-
-`MilvusConfig` import: `rag_system_core.composition.configuration.MilvusConfig`
-
-| 환경변수 | 타입 | 기본값 | 설명 |
-|---|---|---|---|
-| `MILVUS_ENDPOINT` | `str` | 필수 | Milvus URI/endpoint 또는 Milvus Lite 경로 |
-| `MILVUS_TOKEN` | `str` | `None` | optional token; repr에서 숨김 |
-| `MILVUS_DB_NAME` | `str` | `default` | database name |
-| `MILVUS_COLLECTION` | `str` | `None` | RAG adapter가 없으면 `rag_chunks`를 사용할 수 있음 |
-| `MILVUS_SECURE` | `bool` | `false` | Milvus client secure 옵션 |
-| `MILVUS_CONNECT_TIMEOUT_SECONDS` | `int >= 1` | `10` | 설정 value |
-| `MILVUS_REQUEST_TIMEOUT_SECONDS` | `int >= 1` | `30` | Milvus client/adapter timeout |
-| `MILVUS_MAX_RETRIES` | `int >= 0` | `3` | 설정 value로 보관되는 retry 정책 |
-
-현재 canonical 이름은 `MILVUS_ENDPOINT`입니다. 이전 URI 별칭이나 nested 설정명은 이 configuration API의 이름이 아닙니다.
-
-```python
-from rag_system_core.composition.configuration import load_service_configs
-
-settings = load_service_configs(services={"milvus"})
-assert settings.milvus is not None
-print(settings.milvus.endpoint, settings.milvus.collection)
-```
-
-`MilvusLiteVectorStore`를 직접 생성할 때는 `client=`, `collection_name=`, `timeout=`을 명시합니다.
-
-## 5. ServiceConfigs와 service selection
+`ServiceConfigs`는 다음 dataclass입니다.
 
 ```text
 ServiceConfigs(
-    common: CommonConfig,
     milvus: MilvusConfig | None = None,
     ollama: OllamaConfig | None = None,
 )
+```
 
+`Service`는 `Service.MILVUS`, `Service.OLLAMA` 두 값만 지원합니다. `Service.parse(...)`는 문자열을 소문자로 정규화하고 알 수 없는 service에 `ConfigError`를 발생시킵니다.
+
+## 3. Runtime plan
+
+```text
 ServiceSelection(service: Service, required: bool = False)
 HealthcheckPolicy(on_startup: bool = False, parallel: bool = False)
 RuntimePlan(
@@ -113,7 +88,7 @@ RuntimePlan(
 )
 ```
 
-지원 service enum은 `Service.MILVUS`와 `Service.OLLAMA`입니다. `Service.parse("MILVUS")`처럼 대소문자를 정규화할 수 있습니다. 알 수 없는 service, 빈 runtime plan, duplicate selection, 선택되지 않은 `one_of` service는 `ConfigError`입니다.
+`RuntimePlan`은 빈 service, 중복 선택, 선택되지 않은 `one_of` service를 거부합니다. plan을 만드는 helper는 환경을 읽지 않습니다.
 
 ```python
 from rag_system_core.composition.configuration import (
@@ -128,55 +103,56 @@ plan = RuntimePlan(
         ServiceSelection(Service.OLLAMA, required=True),
         ServiceSelection(Service.MILVUS, required=True),
     ),
-    healthcheck=HealthcheckPolicy(on_startup=True, parallel=True),
+    healthcheck=HealthcheckPolicy(on_startup=False, parallel=True),
 )
 assert plan.selected_services == {Service.OLLAMA, Service.MILVUS}
-assert plan.required_services == {Service.OLLAMA, Service.MILVUS}
 ```
 
-## 6. Configuration loader
+## 4. RAG adapter factory 설정 해석
 
-### `load_service_configs`
-
-```text
-load_service_configs(
-    *, services: set[str | Service] | None = None
-) -> ServiceConfigs
-```
-
-선택된 모든 service의 설정을 process environment에서 읽습니다. `services=None`이면 `milvus`와 `ollama`를 모두 선택합니다. 선택된 service의 필수 값이 없으면 secret-safe `ConfigError`가 발생합니다.
-
-### `load_available_service_configs`
-
-```text
-load_available_service_configs(
-    *, services: set[str | Service] | None = None
-) -> ServiceConfigs
-```
-
-선택된 service 중 해당 prefix 환경변수가 하나 이상 있는 service만 로드합니다. 환경값이 전혀 없는 service는 `None`으로 남을 수 있습니다. `load_docmesh_settings`와 runtime bundle이 사용하는 기본 경로입니다.
-
-### `load_docmesh_settings`
-
-```text
-load_docmesh_settings(
-    *, services: set[str | Service] | None = None
-) -> ServiceConfigs
-```
-
-`services=None`이면 `{"milvus", "ollama"}`를 선택하고 `load_available_service_configs`에 위임합니다.
+Canonical import:
 
 ```python
-from rag_system_core.composition.docmesh_runtime import load_docmesh_settings
-
-settings = load_docmesh_settings(services={"ollama", "milvus"})
-if settings.ollama is not None:
-    print(settings.ollama.host)
-if settings.milvus is not None:
-    print(settings.milvus.endpoint)
+from rag_system_core.composition.rag_factories import (
+    create_rag_embedding_client,
+    create_rag_generation_client,
+    create_rag_vector_store,
+)
 ```
 
-## 7. Runtime plan과 bundle lifecycle
+입력 우선순위:
+
+1. 명시적 `client`/`model`/`collection_name`/`timeout` 인자
+2. `settings`가 제공한 설정과 `bundle.configs`
+3. vector collection `rag_chunks`, timeout `30.0`
+
+`settings`가 `bundle`과 함께 있으면 명시적 `settings`가 우선합니다. client가 없고 settings/bundle로 client를 만들 수 없으면 `RuntimeError`입니다. 빈 embedding/generation model은 `ValueError`입니다.
+
+```python
+from rag_system_core.composition.configuration import (
+    MilvusConfig,
+    OllamaConfig,
+    ServiceConfigs,
+)
+from rag_system_core.composition.rag_factories import create_rag_vector_store
+
+settings = ServiceConfigs(
+    milvus=MilvusConfig(endpoint="./data/rag-vectors.db"),
+    ollama=OllamaConfig(
+        host="http://ollama:11434",
+        embedding_model="bge-m3",
+        generation_model="gpt-oss:20b",
+    ),
+)
+
+# 외부 client를 별도로 생성해 전달하는 경우 collection/timeout만 adapter가 해석합니다.
+# vector_store = create_rag_vector_store(
+#     settings=settings,
+#     client=milvus_client,
+# )
+```
+
+## 5. Runtime bundle
 
 ```text
 build_docmesh_runtime_plan(
@@ -188,94 +164,47 @@ build_docmesh_runtime_plan(
     parallel_healthchecks: bool = False,
 ) -> RuntimePlan
 
-assemble_docmesh_services(*, plan: RuntimePlan) -> ServiceBundle
+assemble_docmesh_services(*, plan: RuntimePlan, settings: ServiceConfigs) -> ServiceBundle
 ```
 
-`build_docmesh_runtime_plan`은 service set을 정렬·정규화하고 `HealthcheckPolicy`를 포함한 `RuntimePlan`을 만듭니다. `assemble_docmesh_services`는 plan을 받아 available RAG settings를 로드하고 Ollama/Milvus raw client를 만듭니다.
+`assemble_docmesh_services`는 `settings`에 있는 Ollama/Milvus 설정으로 client를 생성합니다. 반환된 `ServiceBundle`은 context manager가 아니므로 `try/finally`와 `bundle.close()`를 사용합니다.
 
 ```python
+from rag_system_core.composition.configuration import (
+    MilvusConfig,
+    OllamaConfig,
+    ServiceConfigs,
+)
 from rag_system_core.composition.docmesh_runtime import (
     assemble_docmesh_services,
     build_docmesh_runtime_plan,
 )
 
+settings = ServiceConfigs(
+    milvus=MilvusConfig(endpoint="./data/rag-vectors.db"),
+    ollama=OllamaConfig(host="http://ollama:11434"),
+)
 plan = build_docmesh_runtime_plan(
     services={"ollama", "milvus"},
     required={"ollama"},
     check_on_startup=False,
 )
-with assemble_docmesh_services(plan=plan) as bundle:
-    ollama = bundle.get_client("ollama")
-    print(bundle.selected_services, ollama)
+bundle = assemble_docmesh_services(plan=plan, settings=settings)
+try:
+    ollama_client = bundle.get_client("ollama")
+finally:
+    bundle.close()
 ```
 
-`ServiceBundle`이 생성한 client는 bundle 소유입니다. `with` 또는 `bundle.close()`를 사용합니다. bundle 밖에서 만든 client는 caller가 닫습니다.
+`ServiceBundle.close()`는 bundle이 만든 client 중 `close()`를 제공하는 client를 역순으로 정리합니다. bundle 밖에서 만든 raw client는 호출자가 정리합니다.
 
-## 8. DMS runtime 설정
+## 6. DMS 조립
 
-Canonical import: `rag_system_core.composition.dms_runtime.load_dms_settings`
-
-DMS loader가 실제로 읽는 필수 값은 다음과 같습니다.
-
-### 공통 MinIO
-
-| 환경변수 | 타입 | 요구 여부 | 기본값 |
-|---|---|---|---|
-| `DMS_MINIO_ENDPOINT` | `str` | 필수 | 없음 |
-| `DMS_MINIO_ACCESS_KEY` | `str` | 필수 | 없음 |
-| `DMS_MINIO_SECRET_KEY` | `str` | 필수 | 없음 |
-| `DMS_MINIO_BUCKET` | `str` | 필수 | 없음 |
-| `DMS_MINIO_SECURE` | `bool` | 선택 | `false` |
-
-### Backend 선택
-
-| 환경변수 | 의미 |
-|---|---|
-| `DMS_METADATA_BACKEND=sqlite` | SQLite backend를 명시 |
-| `DMS_METADATA_BACKEND=postgresql` | PostgreSQL backend를 명시 |
-| `DMS_CONFIGURATION_STRICT` | backend ambiguity 처리 정책 |
-| `DMS_SQLITE_PATH` | SQLite backend 필수 값 |
-| `DMS_POSTGRES_HOST` | PostgreSQL 선택 단서/필수 값 |
-| `DMS_POSTGRES_DB` | PostgreSQL 필수 값 |
-| `DMS_POSTGRES_USER` | PostgreSQL 필수 값 |
-| `DMS_POSTGRES_PASSWORD` | PostgreSQL 필수 값 |
-| `DMS_POSTGRES_PORT` | PostgreSQL port; 기본 `5432` |
-
-선택 규칙:
-
-1. `DMS_METADATA_BACKEND`가 유효한 `sqlite` 또는 `postgresql`이면 명시 선택을 사용합니다.
-2. 명시값이 없고 PostgreSQL 단서가 있으면 `postgresql`을 선택합니다.
-3. PostgreSQL 단서가 없고 `DMS_SQLITE_PATH`가 있으면 `sqlite`를 선택합니다.
-4. 두 단서가 모두 있고 strict가 아니면 `postgresql`을 선택하고 warning을 기록합니다.
-5. 두 단서가 모두 있고 `DMS_CONFIGURATION_STRICT=true`이면 invalid입니다.
-6. backend와 MinIO 필수 값이 없으면 `dms.ConfigurationError`가 발생합니다.
+Canonical import:
 
 ```python
-from rag_system_core.composition.dms_runtime import load_dms_settings
-
-settings = load_dms_settings()
-print(settings)
+from rag_system_core.composition.dms_runtime import create_dms_sdk_from_clients
 ```
-
-직접 mapping을 전달할 수도 있지만 전역 `os.environ`은 수정되지 않습니다.
-
-```python
-from rag_system_core.composition.dms_runtime import load_dms_settings
-
-test_env = {
-    "DMS_METADATA_BACKEND": "sqlite",
-    "DMS_SQLITE_PATH": ":memory:",
-    "DMS_MINIO_ENDPOINT": "minio:9000",
-    "DMS_MINIO_ACCESS_KEY": "replace-me",
-    "DMS_MINIO_SECRET_KEY": "replace-me",
-    "DMS_MINIO_BUCKET": "documents",
-}
-settings = load_dms_settings(test_env)
-```
-
-`DmsEnvironmentDiagnosis`는 `selected_backend`, `missing_required_keys`, `unsupported_keys`, `warnings`, `valid`를 제공합니다. password·token 값 자체는 진단에 포함되지 않습니다.
-
-## 9. DMS SDK 조립 인자
 
 ```text
 create_dms_sdk_from_clients(
@@ -283,47 +212,27 @@ create_dms_sdk_from_clients(
     engine: sqlalchemy.engine.Engine,
     minio_client: object,
     bucket_name: str,
-    plan: dms.DmsAssemblyPlan | None = None,
 ) -> dms.DefaultDocumentManagementSDK
 ```
 
-SQLAlchemy Engine과 MinIO client는 호출자가 만들고 소유합니다. 이 helper가 반환하는 DMS SDK가 주입 client의 lifecycle을 자동으로 소유하지 않는다는 점을 전제로 합니다. `DocmeshRAGServiceFactory.from_clients`가 이 helper를 사용해 만든 SDK를 Factory-owned로 등록합니다.
+이 helper는 환경변수를 읽지 않습니다. SQLAlchemy `Engine`, MinIO client, bucket name은 호출자가 제공하며 underlying client lifecycle도 호출자 책임입니다. dms-core v0.9 SDK에는 `close()` lifecycle이 없으므로 `DocmeshRAGServiceFactory` context도 DMS SDK를 닫지 않습니다.
 
-## 10. Configuration 오류 처리
+## 7. Metadata 경로
 
-RAG configuration validation은 `ConfigError`로 표준화됩니다.
+- `metadata_engine`을 Factory에 주입하면 `MetadataStore`가 해당 Engine에 바인딩됩니다. 이 경로의 Engine/MetadataStore lifecycle은 caller-owned입니다.
+- `create_metadata_store(metadata_path=...)`를 호출하면 Factory가 SQLite Engine과 `MetadataStore`를 만들고 해당 store를 추적합니다.
+- Factory `close()`는 Factory가 `metadata_path`로 만든 store만 정리합니다.
+- `MetadataStore.close()`는 자신이 바인딩한 Engine에 `dispose()`를 호출합니다.
 
-```python
-from rag_system_core.composition.configuration import ConfigError
+## 8. 설정 오류와 비목표
 
-try:
-    # 필요한 환경이 없는 상태의 예시
-    from rag_system_core.composition.configuration import load_service_configs
-    load_service_configs(services={"ollama"})
-except ConfigError as exc:
-    print(exc)
-    for issue in exc.issues:
-        print(issue.service, issue.env_key, issue.reason)
-```
+- `ConfigError`는 explicit RAG configuration 또는 invalid runtime plan 오류입니다.
+- process environment를 자동으로 읽는 configuration API는 현재 지원하지 않습니다.
+- DMS 설정 진단/환경 loader, `.env` 자동 로드, 임의 SDK `**kwargs` 전달은 현재 공개 계약이 아닙니다.
+- 외부 service가 필요한 Ollama/Milvus/DMS 경로는 [Examples](Examples)와 API의 lifecycle 설명을 함께 확인하십시오.
 
-`ConfigIssue`는 `service`, `env_key`, `reason`을 가지며 secret value를 저장하지 않습니다. `ConfigError.env_keys`는 실패한 환경변수 이름만 tuple로 제공합니다.
+## 9. 추적 근거
 
-## 11. Lifecycle 요약
-
-| 조립 경로 | 생성 자원 소유자 | 정리 |
-|---|---|---|
-| `assemble_docmesh_services` | 반환 `ServiceBundle` | `with bundle` 또는 `bundle.close()` |
-| `DocmeshRAGServiceFactory.from_clients` | Factory는 생성한 DMS SDK만 소유 | `with factory` 또는 `factory.close()` |
-| `DocmeshRAGServiceFactory.from_host_clients` | Factory는 생성한 DMS SDK만 소유 | host Engine/raw client는 caller가 정리 |
-| `RAGCore(...)` 직접 생성 | 호출자 | 각 주입 adapter/store의 계약에 따름 |
-| `MetadataStore(engine)` | Engine 소유자 | `MetadataStore.close()` 후 필요 시 `Engine.dispose()` |
-
-`RAGCore`는 공통 close method를 제공하지 않습니다. `ServiceBundle`과 Factory는 close를 idempotent하게 수행합니다.
-
-## 12. 지원하지 않는 설정 이름
-
-다음은 현재 구현의 canonical 설정 API가 아닙니다.
-
-- 이전 URI/nested/DSN 별칭
-- library가 `.env`를 자동으로 로드한다는 가정
-- 함수에 임의 SDK `**kwargs` 전달
+- 구현: `rag_system_core/composition/configuration.py`, `docmesh_runtime.py`, `rag_factories.py`, `dms_runtime.py`, `service_factory.py`
+- 테스트: `test_rag_system_core/composition/test_core_configuration.py`, `test_docmesh_integration.py`
+- 요구사항: `docs/prd.md` PRD-FR-19, `docs/srs.md` SRS-FR-038–044, SRS-FR-070–071, SRS-FR-075, SRS-FR-079, SRS-NFR-013, SRS-NFR-015–016

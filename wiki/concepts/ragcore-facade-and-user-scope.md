@@ -1,7 +1,7 @@
 ---
 title: RAGCore facade와 사용자 scope
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-08-20
 type: concept
 tags: [rag, workflow, auth, data-model, reliability]
 sources:
@@ -38,7 +38,7 @@ confidence: high
 
 ## 사용자 경계
 
-`AuthenticatedUser`에는 `sub`, 사용자명·이메일·이름, realm/client roles, 원본 claims가 포함된다. 이 중 RAG 저장·검색 scope의 기준은 `sub`다. advanced domain service는 이미 해석된 `user_id`를 직접 받으며 인증이나 scope 보장을 수행하지 않으므로 일반 애플리케이션에서는 `RAGCore` 사용이 안전한 기본 경로다. ^[raw/articles/docmesh-api-reference.md]
+현재 public API의 `AuthenticatedUser`는 `sub: str`만을 받는 간결한 user model이다. 이 값이 RAG 저장·검색 scope의 resolved `user_id`가 된다. advanced domain service는 이미 해석된 `user_id`를 직접 받으며 인증이나 scope 보장을 수행하지 않으므로 일반 애플리케이션에서는 `RAGCore` 사용이 안전한 기본 경로다. ^[raw/articles/docmesh-api-reference.md]
 
 FastAPI adapter는 요청 시작 시 인증된 principal을 만들고, 모든 문서·검색·삭제 호출에 동일한 `sub`를 연결해야 한다. 이 매핑과 endpoint 형태는 [[fastapi-rest-adapter-boundary]]에서 별도 설계 대상으로 취급한다.
 
@@ -46,7 +46,7 @@ DMS SDK는 자체 인증 helper를 제공하지 않고 host가 `AccessContext(su
 
 ## Lifecycle과 실패 의미
 
-`RAGCore` 자체에는 공통 `close()`가 없다. 직접 조립하는 경우 SQLAlchemy `MetadataStore`, transport client, vector store 등의 종료 책임은 호출자에게 있다. Factory가 조립한 DMS SDK나 ServiceBundle client는 해당 Factory/bundle이 소유한다. ^[raw/articles/docmesh-configuration.md]
+`RAGCore` 자체에는 공통 `close()`가 없다. 직접 조립하는 경우 SQLAlchemy `MetadataStore`, transport client, vector store 등의 종료 책임은 호출자에게 있다. `ServiceBundle`은 context manager가 아니며 bundle이 만든 client 중 `close()`를 제공하는 자원만 역순으로 정리한다. Factory는 `metadata_path`로 직접 만든 `MetadataStore`만 추적·정리하고, dms-core v0.9 SDK, host Engine/MinIO/raw transport client, 주입 collaborator는 닫지 않는다. ^[raw/articles/docmesh-api-reference.md]
 
 문서 삭제는 vector → document asset soft delete → RAG metadata/chunk/progress 순서로 진행되며, 중간 실패 뒤 distributed rollback을 보장하지 않는다. 따라서 REST layer는 부분 실패를 500/503으로 무조건 숨기기보다 operation 상태와 재시도 정책을 명시해야 한다. ^[raw/articles/docmesh-api-reference.md]
 

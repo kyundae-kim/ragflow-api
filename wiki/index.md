@@ -2,7 +2,7 @@
 
 > FastAPI 기반 RAG Flow 기능의 RESTful API 지식 카탈로그.
 > 이 파일을 먼저 읽고 관련 페이지를 찾는다.
-> Last updated: 2026-08-10 | Total pages: 10
+> Last updated: 2026-08-20 | Total pages: 10
 
 ## Entities
 <!-- Alphabetical within section -->
@@ -20,7 +20,7 @@
 - [[rag-ingestion-pipeline]] — asset 저장부터 chunking, embedding, vector/metadata 기록까지의 ingestion 흐름.
 - [[rag-query-flow]] — 질문 embedding, user-scoped retrieval, prompt 구성, generation 흐름.
 - [[ragcore-facade-and-user-scope]] — RAGCore dependency injection과 AuthenticatedUser.sub 기반 scope.
-- [[runtime-configuration-and-lifecycle]] — RAG/DMS 환경변수, runtime plan, health check, 자원 소유권.
+- [[runtime-configuration-and-lifecycle]] — 명시적 RAG/DMS 설정 객체, runtime plan, health check, 자원 소유권.
 
 ## Comparisons
 <!-- Architecture and technology comparisons -->

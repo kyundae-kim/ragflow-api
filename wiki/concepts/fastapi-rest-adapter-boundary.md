@@ -1,7 +1,7 @@
 ---
 title: FastAPI REST adapter boundary for RAGCore
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-08-20
 type: concept
 tags: [api, fastapi, rag, auth, data-model, reliability, observability]
 sources:
@@ -68,11 +68,11 @@ DMS는 `error_descriptor()`와 `recommended_http_error()`를 제공해 canonical
 
 ## 운영 경계
 
-설정은 `DOCMESH_`, `MILVUS_`, `OLLAMA_`, `DMS_` namespace로 나뉘고 `.env` 자동 로드는 없다. FastAPI process startup에서 configuration을 로드하고, 명시적 runtime mapping을 사용하면 process의 DocMesh namespace를 assembly 동안 격리한 뒤 복원한다. ServiceBundle/Factory가 소유하는 자원과 host-owned 자원을 구분해 shutdown해야 한다. ^[raw/articles/docmesh-configuration.md]
+현재 docmesh public configuration API는 `ServiceConfigs`와 명시적 client assembly를 사용하며 `DOCMESH_`, `MILVUS_`, `OLLAMA_`, `DMS_` 환경변수나 `.env`를 자동으로 로드하지 않는다. FastAPI composition root가 설정 객체와 host-owned raw client를 직접 준비해 Factory/`assemble_docmesh_services`에 전달해야 한다. `ServiceBundle`은 context manager가 아니므로 `close()`를 명시하고, Factory는 dms-core v0.9 SDK나 host-owned transport를 닫지 않으며 `metadata_path`로 만든 metadata store만 추적한다. ^[raw/articles/docmesh-configuration.md] ^[raw/articles/docmesh-api-reference.md]
 
 현재 composition root는 Keycloak issuer/audience/expiration과 payload `typ=Bearer`를 확인하는 RS256 JWKS 검증기를 만들고, loopback 이외의 identity URL에는 기본적으로 HTTPS를 요구한다. 이어 Ollama/Milvus bundle, DMS SQLAlchemy Engine와 MinIO client, 별도 RAG metadata Engine, `DocmeshRAGServiceFactory`, `RAGCore`를 조립한다. FastAPI lifespan 종료 시 metadata store, factory, host-owned MinIO HTTP pool, metadata/DMS Engine, bundle 순으로 역정리한다. SQLite `:memory:`는 `StaticPool`과 `check_same_thread=False`로 구성해 synchronous route worker thread 사이에서 같은 database를 공유한다. [[runtime-configuration-and-lifecycle]]
 
-health response는 `run_health_checks`의 service별 `ok`, duration, error를 기반으로 만들 수 있다. 단, liveness/readiness 경로와 외부 dependency를 어느 정도까지 required로 볼지는 서비스 운영 정책이다. ^[raw/articles/docmesh-api-reference.md]
+health response는 `run_health_checks`의 service별 `ok`, duration, error를 기반으로 만들 수 있다. 현재 `DmsDocumentStorage` public adapter에는 `check()`가 문서화되어 있지 않으므로 asset storage health를 자동 포함한다고 가정해서는 안 된다. liveness/readiness 경로와 외부 dependency를 어느 정도까지 required로 볼지는 서비스 운영 정책이다. ^[raw/articles/docmesh-api-reference.md]
 
 RAGCore의 `AuthenticatedUser.sub`와 DMS `AccessContext.subject/tenant/roles`를 FastAPI dependency에서 매핑하되, RAG user scope와 DMS `DocumentAccessPolicy`를 중복·혼동하지 않는다. `access_policy`가 없는 DMS SDK는 기본적으로 제한 없이 동작하므로 production adapter에서 정책을 명시해야 한다. [[dms-access-idempotency-and-metadata-policy]] ^[raw/articles/dms-api-reference-v0.7.0.md]
 

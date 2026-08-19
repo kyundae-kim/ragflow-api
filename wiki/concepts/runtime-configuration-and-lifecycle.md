@@ -1,7 +1,7 @@
 ---
 title: RAG runtime configuration과 resource lifecycle
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-08-20
 type: concept
 tags: [deployment, reliability, observability, fastapi, vector-store, embedding, llm]
 sources:
@@ -16,36 +16,33 @@ confidence: high
 
 # RAG runtime configuration과 resource lifecycle
 
-## 설정 namespace
+## 설정 원천과 책임
 
-구현은 RAG runtime과 DMS runtime 설정을 분리한다.
+현재 docmesh configuration은 RAG와 DMS를 모두 **명시적 객체·client 조립**으로 다룬다.
 
-| 영역 | 주요 loader | prefix | 용도 |
-|---|---|---|---|
-| RAG runtime | `load_service_configs`, `load_available_service_configs`, `load_docmesh_settings` | `DOCMESH_`, `MILVUS_`, `OLLAMA_` | Ollama/Milvus client와 RAG adapter |
-| DMS runtime | `load_dms_settings` | `DMS_` | metadata backend와 MinIO |
+| 영역 | 현재 지원 경로 | 책임 |
+|---|---|---|
+| RAG runtime | `ServiceConfigs`, `ServiceBundle`, explicit client/model 인자 | 호출자가 설정과 client를 준비 |
+| DMS runtime | `create_dms_sdk_from_clients(...)` | 호출자가 SQLAlchemy `Engine`, MinIO client, bucket을 준비 |
+| RAG metadata | `metadata_engine` 또는 compatibility `metadata_path` | Factory/호출자 lifecycle 규칙 적용 |
 
-라이브러리는 `.env`를 자동으로 읽지 않는다. 상위 애플리케이션이나 process manager가 값을 `os.environ`에 넣어야 한다. `DMS_SQLITE_PATH`는 DMS metadata 경로이며 RAG metadata용 SQLAlchemy engine/path와 별개다. ^[raw/articles/docmesh-configuration.md]
+`.env`, `DOCMESH_*`, `OLLAMA_*`, `MILVUS_*`, `DMS_*`를 자동으로 읽는 public loader는 현재 없다. `pydantic-settings`가 declared dependency라는 사실도 composition 경로가 process environment를 자동으로 로드한다는 뜻이 아니다. ^[raw/articles/docmesh-configuration.md]
 
-여기서 DMS 설정 loader는 `dms-core` 자체가 아니라 `rag-system-core.composition.dms_runtime.load_dms_settings`라는 host-side composition 계층이다. `dms-core v0.7.0`의 public factory는 환경변수를 읽지 않고, host가 만든 Engine/MinIO client 또는 component를 주입받는다. `DmsServiceConfigs`도 client를 자동 생성하지 않는 immutable value object다. [[dms-core]] ^[raw/articles/dms-configuration-v0.7.0.md]
+## 명시적 RAG 설정 모델
 
-## 핵심 환경값
+`MilvusConfig`는 `endpoint`를 필수로 하고 token, database, collection, secure, connect/request timeout, retry 값을 가진다. `OllamaConfig`는 `host`를 필수로 하며 verify/redirect, generation·embedding model, timeout, retry 값을 가진다. `ServiceConfigs`는 두 설정을 선택적으로 묶고, `ConfigError`는 invalid configuration을 표현한다. ^[raw/articles/docmesh-configuration.md]
 
-- Ollama: `OLLAMA_HOST` 필수, verify SSL/redirect, generation·embedding model, timeout 기본 120초, max retries 기본 2
-- Milvus: `MILVUS_ENDPOINT` 필수, optional token/db/collection, secure, connect timeout 기본 10초, request timeout 기본 30초, max retries 기본 3
-- 공통: `DOCMESH_ENV` 기본 `development`, `DOCMESH_SECURITY_MODE`로 production 판정 가능
-- DMS MinIO: endpoint, access key, secret key, bucket 필수
-- DMS backend: `DMS_METADATA_BACKEND=sqlite|postgresql` 또는 환경 단서로 선택, strict mode에서 SQLite/PostgreSQL 단서 동시 존재는 오류
-
-secret 값은 `ConfigError`의 issue나 진단 결과에 저장하지 않고 환경변수 이름과 원인만 노출한다. ^[raw/articles/docmesh-configuration.md]
+RAG adapter factory의 해석 우선순위는 명시적 `client`/`model`/`collection_name`/`timeout`, 그 다음 `settings`와 `bundle.configs`, 마지막으로 collection `rag_chunks`와 timeout `30.0` 기본값이다. settings나 bundle로 client를 만들 수 없으면 `RuntimeError`, 빈 model은 `ValueError`다. ^[raw/articles/docmesh-configuration.md]
 
 ## RuntimePlan과 ServiceBundle
 
-`build_docmesh_runtime_plan`은 service selection, required services, `one_of` 제약, startup/parallel healthcheck 정책을 포함한 `RuntimePlan`을 만든다. `assemble_docmesh_services`는 plan을 받아 available 설정을 읽고 Ollama/Milvus client를 조립한다. 반환된 `ServiceBundle`은 자신이 생성한 client의 lifecycle을 소유하므로 `with bundle:` 또는 `bundle.close()`를 사용한다. ^[raw/articles/docmesh-configuration.md]
+`build_docmesh_runtime_plan`은 service selection, required services, `one_of` 제약, startup/parallel healthcheck 정책을 포함한 `RuntimePlan`을 만들며 환경을 읽지 않는다. `assemble_docmesh_services(plan=..., settings=...)`는 명시적으로 받은 `ServiceConfigs`로 Ollama/Milvus client를 조립한다. ^[raw/articles/docmesh-configuration.md]
 
-`DocmeshRAGServiceFactory.from_clients`와 `from_host_clients`는 Factory가 만든 DMS SDK만 소유한다. host Engine, MinIO/Ollama/Milvus raw client, 주입된 RAG collaborator는 caller-owned다. 직접 생성한 `RAGCore`도 caller가 각 자원을 정리해야 한다. ^[raw/articles/docmesh-api-reference.md]
+`ServiceBundle`은 context manager가 아니다. bundle이 만든 client 중 `close()`를 제공하는 자원을 역순으로 정리하므로 `try/finally`에서 `bundle.close()`를 호출한다. bundle 밖에서 만든 raw client는 caller-owned다. ^[raw/articles/docmesh-configuration.md]
 
-DMS SDK에 직접 주입된 client/component도 기본적으로 caller-owned다. SDK가 닫아야 하는 자원만 `ManagedResource(ownership=SDK)` 또는 `close_callbacks`로 등록하며, 등록 자원은 역순으로 정리한다. [[dms-core]] ^[raw/articles/dms-api-reference-v0.7.0.md]
+`DocmeshRAGServiceFactory.from_clients`와 `from_host_clients`는 RAG/DMS 환경변수를 읽지 않는다. dms-core v0.9 SDK에는 `close()` lifecycle이 없으므로 Factory context는 DMS SDK를 닫지 않고, host Engine·MinIO·Ollama/Milvus raw client와 주입 collaborator도 caller-owned다. Factory가 `metadata_path`로 만든 `MetadataStore`만 Factory `close()`에서 정리한다. [[dms-core]] ^[raw/articles/docmesh-api-reference.md]
+
+`RAGCore`를 직접 생성하는 경우에도 주입된 `MetadataStore`, transport client, vector store 등의 종료는 호출자 책임이다. `metadata_engine`을 주입한 Factory 경로의 Engine/MetadataStore 역시 caller-owned다. ^[raw/articles/docmesh-configuration.md]
 
 ## Health와 FastAPI 운영
 

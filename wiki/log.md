@@ -49,3 +49,22 @@
 - Recorded implemented endpoint/status contracts, strict Keycloak access-token/HTTPS policy, public DTO filtering, UTF-8/whitespace and upload/body limits, DMS error projection, runtime composition and reverse-order shutdown.
 - Applied independent-review follow-ups: documented public FastAPI discovery routes, aligned every protected operation's OpenAPI errors—including query `400`/`413`—and framework parser errors with runtime bodies, made explicit runtime mappings drive DocMesh loaders deterministically, and added deterministic MinIO HTTP-pool cleanup.
 - Remaining decisions retained explicitly: file idempotency, pagination, role authorization, proactive Keycloak readiness, and partial-failure recovery.
+
+## [2026-08-20] ingest | docmesh-rag-system-core v0.4.0 공개 Wiki 문서
+- Sources refreshed after live-source drift from the 2026-08-10 captures:
+  - `raw/articles/docmesh-api-reference.md`
+  - `raw/articles/docmesh-configuration.md`
+  - `raw/articles/docmesh-examples.md`
+- Current source hashes:
+  - API Reference: `3c82155cb4aafe6ec87ea9da10e1e08931cd8cef487e77d6507871f648572e6f`
+  - Configuration: `77b5cdf6aab72c708be695c774f30789d2344011bbab02fc895027ca93e5ce4b`
+  - Examples: `cb950fa6b08a8010dd1f882d6de7829c28747b0c186b75f065da271cb10cd67c`
+- Pages updated:
+  - `entities/docmesh-rag-system-core.md`
+  - `entities/dms-core.md`
+  - `concepts/runtime-configuration-and-lifecycle.md`
+  - `concepts/ragcore-facade-and-user-scope.md`
+  - `concepts/rag-ingestion-pipeline.md`
+  - `concepts/fastapi-rest-adapter-boundary.md`
+  - `index.md`
+- Source scope: package `0.4.0` public API, explicit configuration/client assembly, `AuthenticatedUser(sub)` user boundary, ServiceBundle/Factory lifecycle, DMS `>=0.9.0` dependency, and runnable examples.

@@ -1,23 +1,25 @@
 ---
 source_url: https://github.com/kyundae-kim/docmesh-rag-system-core/wiki/Examples
-ingested: 2026-08-10
-sha256: bf00b5f4f94f4a74da212af4fbb525eea417cda700fa2fead58601bc382dae28
+ingested: 2026-08-20
+sha256: cb950fa6b08a8010dd1f882d6de7829c28747b0c186b75f065da271cb10cd67c
 ---
 # 사용 예제
 
 이 문서는 현재 `rag-system-core` 공개 import를 사용해 복사·조정할 수 있는 예제 모음입니다. 모든 예제는 현재 `RAGCore` dependency-injection API와 composition API를 기준으로 합니다.
 
 - API 계약: [API-Reference](API-Reference)
-- 환경변수·기본값: [Configuration](Configuration)
+- 설정·lifecycle: [Configuration](Configuration)
 - 권장 첫 실행: §1의 외부 서비스 없는 직접 조립
 
-> 현재 버전은 환경변수만으로 완성된 `RAGCore`를 반환하는 단일 bootstrap helper를 제공하지 않습니다. 외부 설정과 collaborator를 명시적으로 조립해야 합니다.
+> 현재 구현은 환경변수만으로 완성된 `RAGCore`를 반환하는 bootstrap helper를 제공하지 않습니다. 외부 설정과 collaborator를 명시적으로 조립해야 합니다.
 
 ## 1. 외부 서비스 없는 첫 성공: 직접 `RAGCore` 조립
 
-다음 예제는 Ollama, Milvus, MinIO 없이 공개 port 계약과 SQLite metadata store를 사용합니다. `sqlalchemy`는 DMS/runtime dependency set을 통해 설치됩니다.
+다음 예제는 Ollama, Milvus, MinIO 없이 public port 계약과 SQLite metadata store를 사용합니다.
 
 ```python
+from pathlib import Path
+
 from sqlalchemy import create_engine
 
 from rag_system_core import AuthenticatedUser, RAGCore
@@ -44,7 +46,8 @@ class MemoryVectorStore:
         self.next_id = 1
 
     def add(self, chunks: list[ChunkRecord], vectors: list[list[float]]) -> list[str]:
-        del vectors
+        if len(chunks) != len(vectors):
+            raise ValueError("chunks and vectors must have the same length")
         ids: list[str] = []
         for chunk in chunks:
             chunk_id = str(self.next_id)
@@ -115,7 +118,7 @@ class MemoryDocumentStorage:
         *,
         doc_id: str,
         user_id: str,
-        file_path,
+        file_path: Path,
         source: str | None = None,
         idempotency_key: str,
     ) -> str:
@@ -130,20 +133,8 @@ class MemoryDocumentStorage:
         self.values.pop(document.asset_reference or document.doc_id, None)
 
 
-user = AuthenticatedUser(
-    sub="user-a",
-    preferred_username="user-a",
-    email=None,
-    given_name=None,
-    family_name=None,
-    name=None,
-    realm_roles=[],
-    client_roles={},
-    claims={},
-)
-
-metadata_engine = create_engine("sqlite+pysqlite:///:memory:")
-metadata_store = MetadataStore(metadata_engine)
+user = AuthenticatedUser(sub="user-a")
+metadata_store = MetadataStore(create_engine("sqlite+pysqlite:///:memory:"))
 core = RAGCore(
     embedding_client=LocalEmbeddingClient(),
     generation_client=LocalGenerationClient(),
@@ -168,7 +159,7 @@ finally:
     metadata_store.close()
 ```
 
-이 경로의 resource owner는 호출자입니다. `RAGCore`는 주입된 client/store를 닫지 않습니다.
+`RAGCore`는 주입된 client/store의 lifecycle을 소유하지 않습니다. 직접 조립한 `MetadataStore`와 raw client는 호출자가 정리합니다. §2를 같은 프로세스에서 이어서 실행하려면 위 `finally`의 `metadata_store.close()`를 §2의 마지막으로 옮기고, 각 section을 독립 실행할 때는 현재 위치를 유지하십시오.
 
 ## 2. 사용자 스코프와 문서 lifecycle
 
@@ -186,10 +177,7 @@ stream_result = core.ingest_file_stream(
 
 sample_path = Path("sample.txt")
 sample_path.write_text("path 문서", encoding="utf-8")
-path_result = core.ingest_file_path(
-    user=user,
-    file_path=sample_path,
-)
+path_result = core.ingest_file_path(user=user, file_path=sample_path)
 
 for document in core.list_documents(user=user):
     print(document.doc_id, document.source, document.asset_reference)
@@ -202,26 +190,25 @@ assert core.get_document(stream_result.doc_id, user=user) is None
 sample_path.unlink()
 ```
 
-- stream `source`는 필수입니다.
+- stream `source`는 필수이며 없거나 공백이면 `ValueError`입니다.
 - path `source`를 생략하면 파일명이 사용됩니다.
 - stream/path bytes는 UTF-8이어야 합니다.
-- 다른 사용자의 `doc_id`는 조회되지 않고 삭제도 `False`입니다.
+- 다른 사용자의 `doc_id`는 조회되지 않으며 삭제 결과는 `False`입니다.
 
-## 3. Factory를 사용한 RAGCore 조립
+## 3. 이미 만든 collaborator로 Factory 조립
 
-`DocmeshRAGServiceFactory`는 설정 객체를 보관하지 않습니다. 이미 만든 RAG collaborator와 DMS용 Engine/MinIO client를 받아 DMS SDK를 생성합니다.
+다음은 `from_clients`의 signature와 ownership을 보여주는 조립 예제입니다. `minio_client`, RAG collaborator, `user`는 호출 애플리케이션이 준비해야 합니다.
 
 ```python
 from sqlalchemy import create_engine
 
 from rag_system_core import DocmeshRAGServiceFactory
 
-# DMS metadata용 Engine과 RAG metadata용 Engine은 별도입니다.
+
 dms_engine = create_engine("sqlite+pysqlite:///:memory:")
 rag_metadata_engine = create_engine("sqlite+pysqlite:///:memory:")
 
-# embedding_client, generation_client, vector_store는 애플리케이션이 만든
-# EmbeddingClient/GenerationClient/VectorStore 구현체라고 가정합니다.
+# embedding_client, generation_client, vector_store, minio_client, user를 준비했다고 가정합니다.
 with DocmeshRAGServiceFactory.from_clients(
     engine=dms_engine,
     minio_client=minio_client,
@@ -235,16 +222,15 @@ with DocmeshRAGServiceFactory.from_clients(
     core = factory.create_rag_core()
     result = core.ingest_text(user=user, text="factory path", source="factory.txt")
     print(result.doc_id)
-
-# from_clients가 생성한 DMS SDK만 Factory가 닫습니다.
-# dms_engine, rag_metadata_engine, minio_client와 주입 collaborator는 caller-owned입니다.
 ```
 
-`minio_client`, `embedding_client`, `generation_client`, `vector_store`, `user`는 앞선 예제 또는 애플리케이션 구현으로 준비해야 합니다. `metadata_engine` 없이 `create_rag_core()`를 호출하면 `metadata_path is required when metadata_engine is not provided` 오류가 발생합니다.
+`metadata_engine`은 classmethod signature에서는 optional이지만 `create_rag_core()`의 정상 경로에는 필요합니다. 없으면 `create_metadata_store(metadata_path=...)`를 별도로 호출해야 합니다.
+
+주의: dms-core v0.9 SDK에는 `close()` lifecycle이 없습니다. Factory context는 생성한 DMS SDK, host Engine, MinIO client, 주입된 RAG collaborator를 닫지 않습니다. `check_on_startup`은 이 두 classmethod에서 호환성을 위해 유지되지만 startup health check를 실행하지 않습니다.
 
 ## 4. Host-owned raw client에서 시작하기
 
-Ollama, Milvus, MinIO, DMS metadata backend가 준비된 환경에서 사용합니다. 이 예제는 실제 외부 서비스 연결이 필요하므로 실행 전 [Configuration](Configuration)을 확인합니다.
+외부 서비스 연결이 필요합니다. 구체적인 client 준비와 model/collection/timeout은 [Configuration](Configuration)을 확인하십시오.
 
 ```python
 from minio import Minio
@@ -254,7 +240,7 @@ from sqlalchemy import create_engine
 
 from rag_system_core import AuthenticatedUser, DocmeshRAGServiceFactory
 
-# 외부 서비스에 맞게 endpoint와 credential을 변경합니다.
+
 dms_engine = create_engine("sqlite+pysqlite:///./data/dms.db")
 rag_metadata_engine = create_engine("sqlite+pysqlite:///./data/rag-metadata.db")
 minio_client = Minio(
@@ -265,18 +251,7 @@ minio_client = Minio(
 )
 ollama_client = OllamaClient(host="http://ollama:11434")
 milvus_client = MilvusClient(uri="./data/rag-vectors.db")
-
-user = AuthenticatedUser(
-    sub="user-a",
-    preferred_username=None,
-    email=None,
-    given_name=None,
-    family_name=None,
-    name=None,
-    realm_roles=[],
-    client_roles={},
-    claims={},
-)
+user = AuthenticatedUser(sub="user-a")
 
 with DocmeshRAGServiceFactory.from_host_clients(
     engine=dms_engine,
@@ -292,20 +267,22 @@ with DocmeshRAGServiceFactory.from_host_clients(
     check_on_startup=False,
 ) as factory:
     core = factory.create_rag_core()
-    health = core.health_check()
-    print(health.to_dict() if hasattr(health, "to_dict") else health)
+    print(core.health_check().to_dict())
     print(core.ingest_text(user=user, text="host client path", source="host.txt"))
-
-# host-owned Engine, transport client, and injected adapter lifecycle은 caller가 정리합니다.
 ```
 
-`from_host_clients`는 RAG 환경변수를 읽지 않습니다. Ollama/Milvus model·collection·timeout은 인자로 전달됩니다.
+이 경로는 RAG/DMS 환경변수를 읽지 않습니다. host-owned Engine과 raw transport client lifecycle은 호출자가 정리합니다.
 
-## 5. Runtime plan과 ServiceBundle
+## 5. 명시적 settings와 `ServiceBundle`
 
-환경 기반으로 Ollama/Milvus client를 조립해야 할 때 사용합니다. DMS SDK는 이 bundle에 포함되지 않습니다.
+`build_docmesh_runtime_plan`은 plan만 만들고, `assemble_docmesh_services`는 명시적 `ServiceConfigs`로 client를 조립합니다.
 
 ```python
+from rag_system_core.composition.configuration import (
+    MilvusConfig,
+    OllamaConfig,
+    ServiceConfigs,
+)
 from rag_system_core.composition.docmesh_runtime import (
     assemble_docmesh_services,
     build_docmesh_runtime_plan,
@@ -316,56 +293,32 @@ from rag_system_core.composition.rag_factories import (
     create_rag_vector_store,
 )
 
+settings = ServiceConfigs(
+    milvus=MilvusConfig(endpoint="./data/rag-vectors.db"),
+    ollama=OllamaConfig(host="http://ollama:11434"),
+)
 plan = build_docmesh_runtime_plan(
     services={"ollama", "milvus"},
-    required={"ollama", "milvus"},
-    check_on_startup=True,
-    parallel_healthchecks=True,
+    required={"ollama"},
+    check_on_startup=False,
+    parallel_healthchecks=False,
 )
-
-with assemble_docmesh_services(plan=plan) as bundle:
-    embedding = create_rag_embedding_client(
-        bundle=bundle,
-        model="bge-m3",
-    )
-    generation = create_rag_generation_client(
-        bundle=bundle,
-        model="gpt-oss:20b",
-    )
-    vectors = create_rag_vector_store(
-        bundle=bundle,
-        collection_name="rag_chunks",
-        timeout=30.0,
-    )
-    print(embedding.embed(["bundle example"]))
-    print(generation.generate("Say bundle example"))
-    vectors.check()
+bundle = assemble_docmesh_services(plan=plan, settings=settings)
+try:
+    embedding = create_rag_embedding_client(bundle=bundle, model="bge-m3")
+    generation = create_rag_generation_client(bundle=bundle, model="gpt-oss:20b")
+    vectors = create_rag_vector_store(bundle=bundle, collection_name="rag_chunks", timeout=30.0)
+    print(embedding, generation, vectors)
+finally:
+    bundle.close()
 ```
 
-`assemble_docmesh_services`는 `plan`에 선택된 RAG service 설정을 process environment에서 읽습니다. 반환된 `ServiceBundle`이 생성 client lifecycle을 소유합니다.
+`ServiceBundle`은 context manager가 아니므로 `with bundle:`을 사용하지 않습니다. bundle이 생성한 client는 `bundle.close()`로 정리합니다.
 
-## 6. Settings, DMS 설정, health 집계
+## 6. Health aggregation
 
 ```python
-from rag_system_core.composition import (
-    load_docmesh_settings,
-    run_health_checks,
-)
-from rag_system_core.composition.configuration import (
-    load_available_service_configs,
-    load_service_configs,
-)
-from rag_system_core.composition.dms_runtime import load_dms_settings
-
-# RAG service 설정은 MILVUS_* / OLLAMA_* / DOCMESH_*를 사용합니다.
-rag_settings = load_docmesh_settings(services={"ollama", "milvus"})
-available = load_available_service_configs(services={"ollama", "milvus"})
-strict_rag = load_service_configs(services={"ollama"})
-
-# DMS 설정은 DMS_* namespace를 사용합니다.
-dms_settings = load_dms_settings()
-print(rag_settings.common.env, available.common.env, strict_rag.common.env)
-print(dms_settings)
+from rag_system_core.composition.health import run_health_checks
 
 result = run_health_checks(
     {
@@ -373,15 +326,25 @@ result = run_health_checks(
         "custom": lambda: None,
     },
     required_services={"metadata", "custom"},
-    parallel=False,
 )
 assert result.ok
 print(result.to_dict())
 ```
 
-`load_dms_settings()`는 필요한 DMS 환경이 없으면 `dms.ConfigurationError`를 발생시킵니다. `run_health_checks`는 check 예외를 `ServiceHealthStatus(ok=False, error=...)`로 변환합니다.
+check 예외는 `ServiceHealthStatus(ok=False, error=...)`로 변환되고, required check가 없으면 aggregate가 unhealthy가 됩니다. `parallel=True`이면 checks를 병렬 실행합니다.
 
-## 7. Concrete adapter 직접 사용
+## 7. Built-in adapter 직접 사용
+
+### `FixedWindowChunker`
+
+```python
+from rag_system_core.adapters import FixedWindowChunker
+
+chunker = FixedWindowChunker(chunk_size=32, chunk_overlap=4)
+print(chunker.chunk("alpha   beta\n gamma"))
+```
+
+`chunk_size > 0`, `0 <= chunk_overlap < chunk_size`를 요구하며 whitespace를 한 칸으로 정규화합니다.
 
 ### Ollama adapter
 
@@ -394,49 +357,37 @@ client = OllamaClient(host="http://ollama:11434")
 embedding = OllamaEmbeddingClient(client=client, model="bge-m3")
 generation = OllamaGenerationClient(client=client, model="gpt-oss:20b")
 
-vectors = embedding.embed(["hello"])
-answer = generation.generate("Say hello")
-print(len(vectors), answer)
+print(embedding.embed(["hello"]))
+print(generation.generate("Say hello"))
 ```
 
-주입 Ollama client는 embedding에 `embed(model=..., input=...)`, generation에 `chat(model=..., messages=...)`를 제공해야 합니다.
+빈 model은 `ValueError`, transport 또는 malformed response는 `RuntimeError`입니다. 주입 Ollama client는 embedding에 `embed(model=..., input=...)`, generation에 `chat(model=..., messages=...)`를 제공해야 합니다.
 
-### MetadataStore
+### MetadataStore와 Milvus adapter
 
 ```python
 from sqlalchemy import create_engine
-
-from rag_system_core.storage import MetadataStore
-
-engine = create_engine("sqlite+pysqlite:///./data/rag-metadata.db")
-store = MetadataStore(engine)
-try:
-    store.check()
-finally:
-    store.close()
-```
-
-`MetadataStore`는 SQLAlchemy `Engine`을 받고 `documents`, `chunks`, `ingestion_progress` 테이블을 초기화합니다. 파일 경로를 직접 받지 않습니다.
-
-### Milvus vector store
-
-```python
 from pymilvus import MilvusClient
 
-from rag_system_core.storage import MilvusLiteVectorStore
+from rag_system_core.storage import MetadataStore, MilvusLiteVectorStore
 
-client = MilvusClient(uri="./data/rag-vectors.db")
-store = MilvusLiteVectorStore(
-    client=client,
+metadata = MetadataStore(create_engine("sqlite+pysqlite:///./data/rag-metadata.db"))
+try:
+    metadata.check()
+finally:
+    metadata.close()
+
+vectors = MilvusLiteVectorStore(
+    client=MilvusClient(uri="./data/rag-vectors.db"),
     collection_name="rag_chunks",
     timeout=30.0,
 )
-store.check()
+vectors.check()
 ```
 
 ## 8. Advanced domain service
 
-일반 애플리케이션은 `RAGCore`를 사용합니다. 이미 `user_id`를 해석했고 ingestion/retrieval/generation 단계를 직접 조정해야 할 때만 advanced service를 사용합니다.
+일반 애플리케이션은 user-aware `RAGCore`를 사용합니다. 이미 `user_id`를 해석하고 domain 단계만 직접 조정할 때만 다음 advanced path를 사용합니다.
 
 ```python
 from rag_system_core.domain.core import GenerationService, RetrievalService
@@ -446,23 +397,22 @@ retrieval = RetrievalService(
     vector_store=vector_store,
 )
 generation = GenerationService(
-    generation_client,
+    generation_client=generation_client,
     system_prompt="주어진 context만 사용하세요.",
 )
-
 chunks = retrieval.search(user_id="user-a", question="alpha", top_k=3)
 result = generation.generate(question="alpha", context_chunks=chunks)
 print(result.answer)
 ```
 
-이 경로는 `AuthenticatedUser`를 받지 않으며 user-scope·인증 보장은 호출자 책임입니다.
+이 경로는 `AuthenticatedUser`를 받지 않으며 user-scope·인증 보장은 호출자 책임입니다. `IngestionService`, `RetrievalService`, `GenerationService`의 전체 export와 signature는 [API-Reference §8](API-Reference#8-advanced-domain-service-api)를 참조하십시오.
 
-## 9. 테스트
+## 9. 검증
 
 저장소 전체 테스트:
 
 ```bash
-uv run --locked pytest -q
+uv run pytest -q
 ```
 
-Wiki 예제의 `python` fenced code는 현재 public import path와 signature 기준으로 작성되었습니다. 외부 서비스가 필요한 예제는 서비스 연결 상태와 [Configuration](Configuration)을 먼저 확인하십시오.
+Python fenced example은 public import path와 현재 signature 기준으로 작성했습니다. 외부 서비스 예제는 service 연결 상태와 [Configuration](Configuration)을 먼저 확인하십시오.

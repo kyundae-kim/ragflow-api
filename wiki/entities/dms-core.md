@@ -1,7 +1,7 @@
 ---
 title: dms-core v0.7.0 Document Management SDK
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-08-20
 type: entity
 tags: [api, ingestion, data-model, auth, reliability, observability, deployment]
 sources:
@@ -36,7 +36,7 @@ sync facade와 async facade는 같은 기능 계약을 제공한다. Async facad
 
 ## docmesh-rag-system-core와의 관계
 
-[[docmesh-rag-system-core]]의 `DocmeshRAGServiceFactory`는 `create_dms_sdk_from_clients`를 이용해 DMS SDK를 조립하고 `DmsDocumentStorage`를 RAG asset storage로 사용한다. Factory가 생성한 DMS SDK는 Factory-owned이지만, host가 제공한 SQLAlchemy Engine과 MinIO client는 caller-owned로 남는다. ^[raw/articles/docmesh-api-reference.md]
+현재 `docmesh-rag-system-core` `0.4.0`은 `dms-core>=0.9.0`을 선언하고 `DocmeshRAGServiceFactory`가 `create_dms_sdk_from_clients`를 이용해 DMS SDK를 조립한다. `DmsDocumentStorage`를 RAG asset storage로 사용하지만 dms-core v0.9 SDK에는 `close()` lifecycle이 없으므로 Factory context가 DMS SDK를 닫지 않는다. host가 제공한 SQLAlchemy Engine, MinIO client, raw transport와 주입 collaborator는 caller-owned로 남는다. ^[raw/articles/docmesh-api-reference.md]
 
 RAG의 사용자 scope와 DMS의 접근 정책은 같은 계층이 아니다. RAGCore는 `AuthenticatedUser.sub`를 `user_id`로 적용하고, DMS는 host가 `AccessContext`와 `DocumentAccessPolicy`를 정의해 작업을 제한한다. 이 두 경계를 FastAPI adapter에서 함께 연결해야 한다. [[ragcore-facade-and-user-scope]] ^[raw/articles/dms-api-reference-v0.7.0.md]
 
