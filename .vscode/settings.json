@@ -3,5 +3,7 @@
         "test_ragflow"
     ],
     "python.testing.unittestEnabled": false,
-    "python.testing.pytestEnabled": true
+    "python.testing.pytestEnabled": true,
+    "python.terminal.useEnvFile": true,
+    "python.envFile": "${workspaceFolder}/.devcontainer/.env"
 }
