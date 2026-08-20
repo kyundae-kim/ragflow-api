@@ -1,0 +1,14 @@
+.git
+.github
+.hermes
+.venv
+.pytest_cache
+.ruff_cache
+**/__pycache__
+*.py[cod]
+.env
+.env.*
+data
+htmlcov
+wiki
+test_ragflow

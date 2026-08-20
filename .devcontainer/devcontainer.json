@@ -2,8 +2,11 @@
 // README at: https://github.com/devcontainers/templates/tree/main/src/postgres
 {
 	"name": "fastapi template",
-	"dockerComposeFile": ["docker-compose.yml", "docker-compose.keycloak.yml", "docker-compose.db.yml"],
+	"dockerComposeFile": ["docker-compose.yml", "docker-compose.db.yml", "docker-compose.ollama.yml", "docker-compose.milvus.yml"],
 	"service": "app",
+	"mounts": [
+		"source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind,consistency=cached"
+	],
 	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
 	"features": {
 		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
