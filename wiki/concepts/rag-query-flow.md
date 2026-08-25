@@ -1,7 +1,7 @@
 ---
 title: RAG query flow
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-08-26
 type: concept
 tags: [rag, retrieval, embedding, llm, vector-store, workflow, api]
 sources:
@@ -12,6 +12,8 @@ confidence: high
 ---
 
 # RAG query flow
+
+현재 query contract는 `rag-system-core` v0.5.0 source revision `f812b6d78299e9d1179cdbeb88ee9c0aca7864e3`를 기준으로 한다. ^[raw/articles/docmesh-api-reference.md]
 
 ## 정의
 
@@ -60,3 +62,4 @@ question ──> query embedding ──> VectorStore.search(user_id, vector, top
 - [[rag-ingestion-pipeline]]
 - [[runtime-configuration-and-lifecycle]]
 - [[fastapi-rest-adapter-boundary]]
+- [[docmesh-v0-5-host-compatibility]]

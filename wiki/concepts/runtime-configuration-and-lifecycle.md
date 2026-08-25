@@ -1,7 +1,7 @@
 ---
 title: RAG runtime configuration과 resource lifecycle
 created: 2026-08-10
-updated: 2026-08-20
+updated: 2026-08-26
 type: concept
 tags: [deployment, reliability, observability, fastapi, vector-store, embedding, llm]
 sources:
@@ -15,6 +15,8 @@ confidence: high
 ---
 
 # RAG runtime configuration과 resource lifecycle
+
+현재 package 기준은 `rag-system-core` v0.5.0, source revision `f812b6d78299e9d1179cdbeb88ee9c0aca7864e3`, `dms-core>=0.10.0`이다. 이 페이지는 package의 explicit configuration contract와 host가 책임져야 할 lifecycle을 분리해 기록한다. ^[raw/articles/docmesh-api-reference.md] ^[raw/articles/docmesh-configuration.md]
 
 ## 설정 원천과 책임
 
@@ -36,21 +38,23 @@ RAG adapter factory의 해석 우선순위는 명시적 `client`/`model`/`collec
 
 ## RuntimePlan과 ServiceBundle
 
-`build_docmesh_runtime_plan`은 service selection, required services, `one_of` 제약, startup/parallel healthcheck 정책을 포함한 `RuntimePlan`을 만들며 환경을 읽지 않는다. `assemble_docmesh_services(plan=..., settings=...)`는 명시적으로 받은 `ServiceConfigs`로 Ollama/Milvus client를 조립한다. ^[raw/articles/docmesh-configuration.md]
+`build_docmesh_runtime_plan`은 `services`와 `one_of` 제약으로 `RuntimePlan`을 만들며 환경을 읽지 않는다. `services=None`이면 `milvus`와 `ollama`를 모두 선택한다. 현재 v0.5.0 signature에는 `required`, `check_on_startup`, `parallel_healthchecks` 인자가 없다. `assemble_docmesh_services(plan=..., settings=...)`는 명시적으로 받은 `ServiceConfigs`로 Ollama/Milvus client를 조립하고, 조립 중 실패하면 이미 만든 client를 정리한 뒤 예외를 전달한다. ^[raw/articles/docmesh-configuration.md]
 
 `ServiceBundle`은 context manager가 아니다. bundle이 만든 client 중 `close()`를 제공하는 자원을 역순으로 정리하므로 `try/finally`에서 `bundle.close()`를 호출한다. bundle 밖에서 만든 raw client는 caller-owned다. ^[raw/articles/docmesh-configuration.md]
 
-`DocmeshRAGServiceFactory.from_clients`와 `from_host_clients`는 RAG/DMS 환경변수를 읽지 않는다. dms-core v0.9 SDK에는 `close()` lifecycle이 없으므로 Factory context는 DMS SDK를 닫지 않고, host Engine·MinIO·Ollama/Milvus raw client와 주입 collaborator도 caller-owned다. Factory가 `metadata_path`로 만든 `MetadataStore`만 Factory `close()`에서 정리한다. [[dms-core]] ^[raw/articles/docmesh-api-reference.md]
+`DocmeshRAGServiceFactory.from_clients`와 `from_host_clients`는 RAG/DMS 환경변수를 읽지 않는다. v0.5.0 문서의 Factory context는 DMS SDK, host Engine·MinIO·Ollama/Milvus raw client와 주입 collaborator를 닫지 않는다. Factory가 `metadata_path`로 만든 `MetadataStore`만 Factory `close()`에서 정리하고, `metadata_engine`으로 만든 store는 caller-owned다. [[dms-core]] ^[raw/articles/docmesh-api-reference.md] ^[raw/articles/docmesh-configuration.md]
 
 `RAGCore`를 직접 생성하는 경우에도 주입된 `MetadataStore`, transport client, vector store 등의 종료는 호출자 책임이다. `metadata_engine`을 주입한 Factory 경로의 Engine/MetadataStore 역시 caller-owned다. ^[raw/articles/docmesh-configuration.md]
 
 ## Health와 FastAPI 운영
 
-`run_health_checks`는 service check 예외를 `ServiceHealthStatus(ok=False, error=...)`로 변환하고, required service의 누락 check도 실패로 처리한다. 결과는 `ok`와 서비스별 duration/error를 가진 JSON-friendly 모델로 변환할 수 있다. ^[raw/articles/docmesh-api-reference.md]
+현재 v0.5.0 `rag-system-core`에는 `RAGCore.health_check()`, `run_health_checks`, startup check option 또는 health policy API가 없다. FastAPI의 `/health`와 readiness는 host-owned dependency check로 구현해야 하며, 실제 경로·status code·liveness/readiness 분리는 source 문서가 정하지 않는다. HTTP 경계는 [[fastapi-rest-adapter-boundary]]에서 설계한다. ^[raw/articles/docmesh-api-reference.md] ^[raw/articles/docmesh-configuration.md]
 
-FastAPI의 `/health` 또는 readiness endpoint는 이 결과를 이용해 dependency 상태를 표현할 수 있지만, 실제 경로·status code·liveness/readiness 분리는 source 문서가 정하지 않는다. HTTP 경계는 [[fastapi-rest-adapter-boundary]]에서 설계한다.
+이 Wiki의 [[dms-core]] 및 [[dms-error-and-http-contract]]는 별도 versioned DMS v0.7.0 문서의 `check_health()`와 startup health semantics를 기록한다. 이를 현재 `rag-system-core` v0.5.0 public API가 제공하는 health surface로 일반화하지 않는다. ^[raw/articles/dms-configuration-v0.7.0.md]
 
-DMS `check_health()`는 `HealthStatus`를 반환하고, startup check 실패는 `HealthCheckFailedError`와 SDK-owned resource rollback으로 처리한다. FastAPI startup mandatory check와 runtime health observation을 분리하고, 외부 오류는 [[dms-error-and-http-contract]]의 stable descriptor를 사용한다. ^[raw/articles/dms-configuration-v0.7.0.md]
+## Host compatibility watch
+
+현재 repository의 `ragflow/runtime.py`는 package 문서에 없는 runtime plan·Factory health 인자를 전달하고, `ragflow/api/health.py`는 package 문서에 없는 `core.health_check()`를 호출한다. v0.5.0 package와 host의 실제 조립 계약을 맞추는 작업은 [[docmesh-v0-5-host-compatibility]]에서 추적한다.
 
 ## 관련 페이지
 

@@ -75,3 +75,26 @@
   - `entities/docmesh-rag-system-core.md`
   - `index.md`
 - Replaced the former Keycloak/Bearer contract with the host API's direct `X-User-Id` header contract. The API now creates `AuthenticatedUser(sub=...)` without identity-provider verification; trusted gateway/user-header ownership remains an external boundary responsibility.
+
+## [2026-08-26] ingest | docmesh-rag-system-core v0.5.0 공개 Wiki 문서
+- Sources refreshed after live-source drift:
+  - `raw/articles/docmesh-api-reference.md`
+  - `raw/articles/docmesh-configuration.md`
+  - `raw/articles/docmesh-examples.md`
+- Current source hashes:
+  - API Reference: `22e669aa6653a965f2d5aaa0c9405929c9d82f8c9652d6691936e2ebeed9598c`
+  - Configuration: `432717bca9e5ca81e5f9ca7e4112a1f889e76e61b6634fd14bf9bd7df19c1a77`
+  - Examples: `299b06d14b7752d5ba88a4657f3dfce46f9149db0484061949f63d8ee1eeab50`
+- Pages created:
+  - `comparisons/docmesh-v0-5-host-compatibility.md`
+- Pages updated:
+  - `entities/docmesh-rag-system-core.md`
+  - `entities/dms-core.md`
+  - `concepts/fastapi-rest-adapter-boundary.md`
+  - `concepts/rag-ingestion-pipeline.md`
+  - `concepts/rag-query-flow.md`
+  - `concepts/ragcore-facade-and-user-scope.md`
+  - `concepts/runtime-configuration-and-lifecycle.md`
+  - `index.md`
+- Source scope: package `0.5.0`, source revision `f812b6d78299e9d1179cdbeb88ee9c0aca7864e3`, explicit configuration/runtime plan, public API export boundaries, ingestion/query/document lifecycle, DMS `>=0.10.0` boundary, and runnable examples.
+- Compatibility finding: the current host still passes legacy health-related arguments and calls `core.health_check()`, which are absent from the v0.5.0 package contract; recorded in `comparisons/docmesh-v0-5-host-compatibility.md` without changing host code.
