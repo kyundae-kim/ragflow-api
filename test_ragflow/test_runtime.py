@@ -113,14 +113,46 @@ def test_build_runtime_closes_every_host_owned_resource(monkeypatch: pytest.Monk
     factory = Closeable("factory")
     factory.create_rag_core = lambda **_: core  # type: ignore[attr-defined]
     captured: dict[str, object] = {}
+    plan_arguments: dict[str, object] = {}
 
     class FactoryType:
         @classmethod
-        def from_host_clients(cls, **kwargs: object) -> Closeable:
-            captured.update(kwargs)
+        def from_host_clients(
+            cls,
+            *,
+            engine: object,
+            metadata_engine: object,
+            minio_client: object,
+            bucket_name: str,
+            ollama_client: object,
+            milvus_client: object,
+            embedding_model: str,
+            generation_model: str,
+            collection_name: str,
+            timeout: float,
+        ) -> Closeable:
+            del cls
+            captured.update(
+                {
+                    "engine": engine,
+                    "metadata_engine": metadata_engine,
+                    "minio_client": minio_client,
+                    "bucket_name": bucket_name,
+                    "ollama_client": ollama_client,
+                    "milvus_client": milvus_client,
+                    "embedding_model": embedding_model,
+                    "generation_model": generation_model,
+                    "collection_name": collection_name,
+                    "timeout": timeout,
+                }
+            )
             return factory
 
-    monkeypatch.setattr(runtime, "build_docmesh_runtime_plan", lambda **_: object())
+    def build_plan(*, services: set[str]) -> object:
+        plan_arguments["services"] = services
+        return object()
+
+    monkeypatch.setattr(runtime, "build_docmesh_runtime_plan", build_plan)
     monkeypatch.setattr(runtime, "assemble_docmesh_services", lambda **_: bundle)
     monkeypatch.setattr(
         runtime,
@@ -149,9 +181,11 @@ def test_build_runtime_closes_every_host_owned_resource(monkeypatch: pytest.Monk
         "OLLAMA_EMBEDDING_MODEL": "embedding-model",
         "OLLAMA_GENERATION_MODEL": "generation-model",
         "MILVUS_ENDPOINT": "milvus.example",
+        "RAGFLOW_CHECK_ON_STARTUP": "false",
     }
     with runtime.build_runtime(env) as components:
         assert components.core is core
+        assert plan_arguments["services"] == {"ollama", "milvus"}
         assert captured["engine"] is dms_engine
         assert captured["metadata_engine"] is metadata_engine
         assert captured["minio_client"] is minio_client

@@ -5,8 +5,7 @@ from contextlib import contextmanager
 
 from fastapi.testclient import TestClient
 
-from ragflow.app import create_app
-from test_ragflow.test_api import user_headers
+from test_ragflow.test_api import running_api, user_headers
 
 TEST_USER_IDS = ("workflow-user", "user-a", "user-b")
 
@@ -25,7 +24,7 @@ def delete_test_documents(client: TestClient) -> None:
 
 @contextmanager
 def running_default_app() -> Iterator[TestClient]:
-    with TestClient(create_app()) as client:
+    with running_api() as (client, _):
         delete_test_documents(client)
         try:
             yield client

@@ -26,6 +26,7 @@ from ragflow.api.middleware import (
     request_body_too_large_handler,
 )
 from ragflow.api.query import router as query_router
+from ragflow.health import HealthCheckRunner, build_core_health_check_runner
 from ragflow.runtime import DEFAULT_MAX_UPLOAD_BYTES, RuntimeFactory, build_runtime
 
 
@@ -34,6 +35,7 @@ def create_app(
     core: RAGCore | None = None,
     runtime_factory: RuntimeFactory | None = None,
     max_upload_bytes: int | None = None,
+    health_check_runner: HealthCheckRunner | None = None,
 ) -> FastAPI:
     if max_upload_bytes is not None and max_upload_bytes <= 0:
         raise ValueError("max_upload_bytes must be positive")
@@ -52,6 +54,11 @@ def create_app(
                 effective_upload_limit = max_upload_bytes or components.max_upload_bytes
                 app.state.max_upload_bytes = effective_upload_limit
                 app.state.max_request_bytes = request_body_limit(effective_upload_limit)
+                app.state.health_check_runner = (
+                    health_check_runner
+                    or components.health_check_runner
+                    or build_core_health_check_runner(components.core)
+                )
                 yield
 
         lifespan = managed_lifespan
@@ -62,6 +69,7 @@ def create_app(
         app.state.rag_core = core
         app.state.max_upload_bytes = effective_upload_limit
         app.state.max_request_bytes = request_body_limit(effective_upload_limit)
+        app.state.health_check_runner = health_check_runner or build_core_health_check_runner(core)
     app.add_middleware(ConfiguredRequestBodyLimitMiddleware)
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(RequestBodyTooLarge, request_body_too_large_handler)

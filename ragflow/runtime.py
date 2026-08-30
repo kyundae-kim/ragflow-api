@@ -25,6 +25,11 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.pool import StaticPool
 
+from ragflow.health import (
+    HealthCheckRunner,
+    build_runtime_health_check_runner,
+)
+
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
@@ -32,6 +37,7 @@ DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 class RuntimeComponents:
     core: RAGCore
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
+    health_check_runner: HealthCheckRunner | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,9 +113,6 @@ def build_runtime(
     with ExitStack() as resources:
         plan = build_docmesh_runtime_plan(
             services={"ollama", "milvus"},
-            required={"ollama", "milvus"},
-            check_on_startup=settings.check_on_startup,
-            parallel_healthchecks=True,
         )
         bundle = assemble_docmesh_services(plan=plan, settings=rag_settings)
         resources.callback(bundle.close)
@@ -148,7 +151,6 @@ def build_runtime(
             ),
             collection_name=milvus_settings.collection or "rag_chunks",
             timeout=float(milvus_settings.request_timeout_seconds),
-            check_on_startup=settings.check_on_startup,
         )
         resources.callback(factory.close)
         core = factory.create_rag_core(
@@ -160,9 +162,21 @@ def build_runtime(
             raise TypeError("RAG metadata store does not expose close()")
         resources.callback(close_metadata_store)
 
+        health_check_runner = build_runtime_health_check_runner(
+            dms_engine=dms_engine,
+            metadata_engine=metadata_engine,
+            minio_client=minio_client,
+            bucket_name=dms_settings.minio_bucket,
+            ollama_client=bundle.get_client("ollama"),
+            milvus_client=bundle.get_client("milvus"),
+        )
+        if settings.check_on_startup and not health_check_runner().ok:
+            raise RuntimeError("Application dependency health check failed")
+
         yield RuntimeComponents(
             core=core,
             max_upload_bytes=settings.max_upload_bytes,
+            health_check_runner=health_check_runner,
         )
 
 

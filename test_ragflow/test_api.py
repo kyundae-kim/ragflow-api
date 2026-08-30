@@ -9,11 +9,12 @@ from dms import StorageError
 from fastapi.testclient import TestClient
 from rag_system_core import AuthenticatedUser, RAGCore
 from rag_system_core.adapters import FixedWindowChunker
-from rag_system_core.composition import run_health_checks
 from rag_system_core.storage import MetadataStore
 from rag_system_core.types import ChunkRecord, DocumentRecord
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
+
+from ragflow.app import create_app
 
 
 class LocalEmbeddingClient:
@@ -129,8 +130,6 @@ def running_api(
     raise_server_exceptions: bool = True,
     max_upload_bytes: int = 10 * 1024 * 1024,
 ) -> Iterator[tuple[TestClient, RAGCore]]:
-    from ragflow.app import create_app
-
     engine = create_engine(
         "sqlite+pysqlite://",
         connect_args={"check_same_thread": False},
@@ -144,7 +143,6 @@ def running_api(
         metadata_store=metadata_store,
         document_storage=MemoryDocumentStorage(),
         chunker=FixedWindowChunker(chunk_size=512, chunk_overlap=64),
-        health_check_runner=run_health_checks,
     )
     app = create_app(
         core=core,
