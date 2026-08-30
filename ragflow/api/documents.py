@@ -100,6 +100,25 @@ def list_ingestion_progress(
     ]
 
 
+@router.get(
+    "/{doc_id}/ingestion-step-statuses",
+    response_model=dict[str, str],
+)
+def get_ingestion_step_statuses(
+    doc_id: str,
+    core: RAGCoreDependency,
+    user: CurrentUserDependency,
+    job_id: str | None = None,
+) -> dict[str, str]:
+    if core.get_document(doc_id, user=user) is None:
+        raise _document_not_found()
+    return core.get_ingestion_step_statuses(
+        doc_id,
+        user=user,
+        job_id=job_id,
+    )
+
+
 @router.delete("/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_document(
     doc_id: str,

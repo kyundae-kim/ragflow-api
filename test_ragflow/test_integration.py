@@ -83,6 +83,21 @@ def test_document_lifecycle_completes_through_http_boundary() -> None:
         assert progress[0]["doc_id"] == doc_id
         assert progress[-1]["status"] == "completed"
 
+        statuses_response = client.get(
+            f"/documents/{doc_id}/ingestion-step-statuses",
+            headers=headers,
+            params={"job_id": job_id},
+        )
+        assert statuses_response.status_code == 200
+        assert statuses_response.json() == {
+            "load": "completed",
+            "preprocess": "completed",
+            "chunking": "completed",
+            "embedding": "completed",
+            "vector_store": "completed",
+            "chunk_persistence": "completed",
+        }
+
         query_response = client.post(
             "/query",
             headers=headers,

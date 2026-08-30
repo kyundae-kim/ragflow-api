@@ -63,6 +63,7 @@ def test_openapi_business_operations_use_direct_user_id_contract() -> None:
         ("delete", "/documents/{doc_id}"),
         ("get", "/documents/{doc_id}/chunks"),
         ("get", "/documents/{doc_id}/ingestion-progress"),
+        ("get", "/documents/{doc_id}/ingestion-step-statuses"),
         ("post", "/query"),
     }
     for method, path in expected_protected_operations:

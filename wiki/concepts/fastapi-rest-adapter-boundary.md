@@ -27,9 +27,10 @@ contested: true
 | `POST /documents/file` | `core.ingest_file_stream` | multipart UTF-8, size/body limit 후 동기 `201` |
 | `GET /documents` | `core.list_documents` | principal의 user scope |
 | `GET /documents/{doc_id}` | `core.get_document` | 다른 사용자 문서는 not found로 conceal |
-| `GET /documents/{doc_id}/chunks` | `core.list_document_chunks` | metadata는 `source` allowlist만 공개 |
-| `GET /documents/{doc_id}/ingestion-progress` | `core.list_ingestion_progress` | `job_id` filter 지원 가능 |
-| `DELETE /documents/{doc_id}` | `core.delete_document` | `False`는 concealment `404` |
+- `GET /documents/{doc_id}/chunks` | `core.list_document_chunks` | metadata는 `source` allowlist만 공개 |
+- `GET /documents/{doc_id}/ingestion-progress` | `core.list_ingestion_progress` | `job_id` filter 지원 가능 |
+- `GET /documents/{doc_id}/ingestion-step-statuses` | `core.get_ingestion_step_statuses` | 단계별 final status map, `job_id` filter 지원 |
+- `DELETE /documents/{doc_id}` | `core.delete_document` | `False`는 concealment `404` |
 | `POST /query` | `core.query` | question/`top_k` 검증, filtered context 공개 |
 | `GET /health/live` | 없음 | 외부 dependency를 호출하지 않는 liveness |
 | `GET /health/ready` | host-owned dependency checks | v0.5.0 package에는 `core.health_check`가 없어 직접 호출할 수 없음 |

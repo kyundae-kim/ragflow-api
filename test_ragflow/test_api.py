@@ -350,6 +350,45 @@ def test_list_ingestion_progress_hides_another_users_document() -> None:
         assert response.json()["code"] == "document_not_found"
 
 
+def test_get_ingestion_step_statuses_returns_final_pipeline_statuses() -> None:
+    user = make_user()
+    with running_api() as (client, core):
+        document = core.ingest_text(user=user, text="body", source="owned.txt")
+
+        response = client.get(
+            f"/documents/{document.doc_id}/ingestion-step-statuses",
+            headers=user_headers(),
+            params={"job_id": document.job_id},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "load": "completed",
+            "preprocess": "completed",
+            "chunking": "completed",
+            "embedding": "completed",
+            "vector_store": "completed",
+            "chunk_persistence": "completed",
+        }
+
+
+def test_get_ingestion_step_statuses_hides_another_users_document() -> None:
+    with running_api() as (client, core):
+        hidden = core.ingest_text(
+            user=make_user("user-b"),
+            text="hidden",
+            source="hidden.txt",
+        )
+
+        response = client.get(
+            f"/documents/{hidden.doc_id}/ingestion-step-statuses",
+            headers=user_headers(),
+        )
+
+        assert response.status_code == 404
+        assert response.json()["code"] == "document_not_found"
+
+
 def test_delete_document_delegates_to_rag_core() -> None:
     user = make_user()
     with running_api() as (client, core):

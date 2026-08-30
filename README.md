@@ -30,6 +30,7 @@ API는 identity provider 또는 token을 검증하지 않습니다. `X-User-Id` 
 | `GET` | `/documents/{doc_id}` | 현재 사용자의 문서 조회 |
 | `GET` | `/documents/{doc_id}/chunks` | 문서 청크 조회 |
 | `GET` | `/documents/{doc_id}/ingestion-progress` | ingestion 진행 기록 조회 |
+| `GET` | `/documents/{doc_id}/ingestion-step-statuses` | ingestion 단계별 최종 상태 조회 |
 | `DELETE` | `/documents/{doc_id}` | 문서와 파생 데이터 삭제 |
 | `POST` | `/query` | 현재 사용자의 청크로 RAG 질의 |
 
