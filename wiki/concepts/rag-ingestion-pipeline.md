@@ -1,7 +1,7 @@
 ---
 title: RAG ingestion pipeline
 created: 2026-08-10
-updated: 2026-08-20
+updated: 2026-08-26
 type: concept
 tags: [rag, ingestion, embedding, vector-store, data-model, reliability, workflow]
 sources:
@@ -15,6 +15,8 @@ confidence: high
 ---
 
 # RAG ingestion pipeline
+
+현재 package 기준은 `rag-system-core` v0.5.0이며 DMS runtime dependency는 `dms-core>=0.10.0`이다. 아래 pipeline은 source revision `f812b6d78299e9d1179cdbeb88ee9c0aca7864e3`의 public API를 요약한다. ^[raw/articles/docmesh-api-reference.md]
 
 ## 흐름
 
@@ -53,9 +55,9 @@ confidence: high
 
 ## DMS asset upload contract
 
-docmesh의 `DmsDocumentStorage`는 DMS document id, asset reference, text/file stream/path upload, content load, soft delete를 RAG ingestion에 연결한다. 현재 `rag-system-core` package는 `dms-core>=0.9.0`을 dependency로 선언하지만, 이 Wiki의 세부 upload 입력·stream 계약은 versioned `dms-core v0.7.0` source에 근거하므로 버전 경계를 구분해 읽어야 한다. 해당 DMS 문서는 bytes, file path, 정확한 크기의 sync binary stream을 지원하고 unknown-size/async input stream은 지원하지 않는다고 기록한다. 따라서 FastAPI multipart 계층은 stream size와 close ownership을 명시적으로 다뤄야 한다. [[dms-core]] ^[raw/articles/docmesh-api-reference.md] ^[raw/articles/dms-api-reference-v0.7.0.md]
+docmesh의 `DmsDocumentStorage`는 DMS document id, asset reference, text/file stream/path upload, content load, soft delete를 RAG ingestion에 연결한다. 현재 `rag-system-core` package는 `dms-core>=0.10.0`을 dependency로 선언하지만, 이 Wiki의 세부 upload 입력·stream 계약은 versioned `dms-core v0.7.0` source에 근거하므로 버전 경계를 구분해 읽어야 한다. 해당 DMS 문서는 bytes, file path, 정확한 크기의 sync binary stream을 지원하고 unknown-size/async input stream은 지원하지 않는다고 기록한다. 따라서 FastAPI multipart 계층은 stream size와 close ownership을 명시적으로 다뤄야 한다. [[dms-core]] ^[raw/articles/docmesh-api-reference.md] ^[raw/articles/dms-api-reference-v0.7.0.md]
 
-현재 docmesh API reference에는 `DmsDocumentStorage`의 `check()`가 공개되어 있지 않다. 따라서 health 집계가 asset adapter까지 포함한다고 가정하지 말고 실제 collaborator가 제공하는 check surface를 기준으로 readiness 범위를 정해야 한다. ^[raw/articles/docmesh-api-reference.md]
+현재 v0.5.0 docmesh API reference에는 Ollama·metadata·vector·DMS health-check API와 `DmsDocumentStorage.check()`가 공개되어 있지 않다. 따라서 health 집계가 asset adapter까지 포함한다고 가정하지 말고 host가 별도 dependency check 범위를 정의해야 한다. ^[raw/articles/docmesh-api-reference.md]
 
 DMS upload는 object를 먼저 저장한 뒤 metadata를 기록하고, metadata 오류 시 object rollback을 시도한다. rollback까지 실패하면 `ConsistencyError`가 되며, DMS reset/reconciliation도 분산 transaction을 제공하지 않는다. RAG의 vector·metadata·DMS asset pipeline은 [[dms-document-lifecycle]]의 내부 복구 경계와 별도로 운영 recovery를 가져야 한다. ^[raw/articles/dms-api-reference-v0.7.0.md]
 
@@ -77,6 +79,7 @@ vector ID 수가 입력 chunk 수와 다르거나 metadata chunk 저장이 실�
 - [[rag-query-flow]]
 - [[runtime-configuration-and-lifecycle]]
 - [[fastapi-rest-adapter-boundary]]
+- [[docmesh-v0-5-host-compatibility]]
 - [[dms-core]]
 - [[dms-document-lifecycle]]
 - [[dms-access-idempotency-and-metadata-policy]]

@@ -9,11 +9,12 @@ from dms import StorageError
 from fastapi.testclient import TestClient
 from rag_system_core import AuthenticatedUser, RAGCore
 from rag_system_core.adapters import FixedWindowChunker
-from rag_system_core.composition import run_health_checks
 from rag_system_core.storage import MetadataStore
 from rag_system_core.types import ChunkRecord, DocumentRecord
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
+
+from ragflow.app import create_app
 
 
 class LocalEmbeddingClient:
@@ -129,8 +130,6 @@ def running_api(
     raise_server_exceptions: bool = True,
     max_upload_bytes: int = 10 * 1024 * 1024,
 ) -> Iterator[tuple[TestClient, RAGCore]]:
-    from ragflow.app import create_app
-
     engine = create_engine(
         "sqlite+pysqlite://",
         connect_args={"check_same_thread": False},
@@ -144,7 +143,6 @@ def running_api(
         metadata_store=metadata_store,
         document_storage=MemoryDocumentStorage(),
         chunker=FixedWindowChunker(chunk_size=512, chunk_overlap=64),
-        health_check_runner=run_health_checks,
     )
     app = create_app(
         core=core,
@@ -345,6 +343,45 @@ def test_list_ingestion_progress_hides_another_users_document() -> None:
 
         response = client.get(
             f"/documents/{hidden.doc_id}/ingestion-progress",
+            headers=user_headers(),
+        )
+
+        assert response.status_code == 404
+        assert response.json()["code"] == "document_not_found"
+
+
+def test_get_ingestion_step_statuses_returns_final_pipeline_statuses() -> None:
+    user = make_user()
+    with running_api() as (client, core):
+        document = core.ingest_text(user=user, text="body", source="owned.txt")
+
+        response = client.get(
+            f"/documents/{document.doc_id}/ingestion-step-statuses",
+            headers=user_headers(),
+            params={"job_id": document.job_id},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "load": "completed",
+            "preprocess": "completed",
+            "chunking": "completed",
+            "embedding": "completed",
+            "vector_store": "completed",
+            "chunk_persistence": "completed",
+        }
+
+
+def test_get_ingestion_step_statuses_hides_another_users_document() -> None:
+    with running_api() as (client, core):
+        hidden = core.ingest_text(
+            user=make_user("user-b"),
+            text="hidden",
+            source="hidden.txt",
+        )
+
+        response = client.get(
+            f"/documents/{hidden.doc_id}/ingestion-step-statuses",
             headers=user_headers(),
         )
 

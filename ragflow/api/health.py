@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Request, Response, status
 
 from ragflow.api.dependencies import RAGCoreDependency
 from ragflow.api.openapi import READINESS_ERROR_RESPONSES
 from ragflow.api.schemas import ReadinessResponse, ServiceHealthResponse
+from ragflow.health import failed_health_check_result
 
 router = APIRouter(prefix="/health", tags=["health"])
 
@@ -21,9 +22,17 @@ def liveness() -> dict[str, str]:
 )
 def readiness(
     response: Response,
-    core: RAGCoreDependency,
+    request: Request,
+    _: RAGCoreDependency,
 ) -> ReadinessResponse:
-    result = core.health_check()
+    health_check_runner = getattr(request.app.state, "health_check_runner", None)
+    if not callable(health_check_runner):
+        result = failed_health_check_result()
+    else:
+        try:
+            result = health_check_runner()
+        except Exception:
+            result = failed_health_check_result()
     ok = bool(getattr(result, "ok", False))
     if not ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE

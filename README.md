@@ -1,6 +1,6 @@
 # RAG Flow API
 
-FastAPI를 HTTP/API 계층으로, `docmesh-rag-system-core v0.4.0`의 `RAGCore`를
+FastAPI를 HTTP/API 계층으로, `docmesh-rag-system-core v0.5.0`의 `RAGCore`를
 application 계층으로 사용하는 동기식 RAG API입니다. API 계층은 사용자 scope 입력, 요청 검증,
 multipart 처리, 공개 응답 DTO, HTTP 오류 매핑을 담당하고 ingestion/retrieval/generation
 규칙은 `RAGCore`에 위임합니다.
@@ -30,6 +30,7 @@ API는 identity provider 또는 token을 검증하지 않습니다. `X-User-Id` 
 | `GET` | `/documents/{doc_id}` | 현재 사용자의 문서 조회 |
 | `GET` | `/documents/{doc_id}/chunks` | 문서 청크 조회 |
 | `GET` | `/documents/{doc_id}/ingestion-progress` | ingestion 진행 기록 조회 |
+| `GET` | `/documents/{doc_id}/ingestion-step-statuses` | ingestion 단계별 최종 상태 조회 |
 | `DELETE` | `/documents/{doc_id}` | 문서와 파생 데이터 삭제 |
 | `POST` | `/query` | 현재 사용자의 청크로 RAG 질의 |
 
